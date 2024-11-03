@@ -1,6 +1,11 @@
-use clap::{Parser, ValueHint};
+use clap::Parser;
 use rand::prelude::*;
 use std::path::PathBuf;
+use winit::{
+    event::{Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    window::WindowBuilder,
+};
 
 mod body;
 mod fileio;
@@ -11,9 +16,8 @@ mod tree;
 use crate::body::Body;
 use crate::simulation::Simulation;
 use crate::fileio::{read_bodies, write_bodies};
-use crate::render::{init_window, close_window, window_open};
 
-const DEFAULT_BODIES: usize = 100;
+const DEFAULT_BODIES: usize = 1000;
 const DEFAULT_MASS: f64 = 2000.0;
 const DEFAULT_G: f64 = 6.67384e-11;
 const DEFAULT_TIMESTEP: f64 = 0.1;
@@ -22,7 +26,7 @@ const DEFAULT_SPIN: f64 = 0.05;
 const DEFAULT_MZERO: f64 = 1.0e7;
 const DEFAULT_TREE_RATIO: f64 = 3.0;
 const DEFAULT_WRITE_INTERVAL: usize = 100;
-const PI: f64 = std::f64::consts::PI;
+const PI: f64 = std::f32::consts::PI as f64;
 
 /// Barnes-Hut N-body gravitational simulation
 #[derive(Parser, Debug)]
@@ -61,11 +65,11 @@ struct Config {
     tree_ratio: f64,
 
     /// Input file to resume simulation from
-    #[arg(short = 'r', long = "resume", value_hint = ValueHint::FilePath)]
+    #[arg(short = 'r', long = "resume")]
     input_file: Option<PathBuf>,
 
     /// Output file to save simulation state
-    #[arg(short = 'o', long = "output", value_hint = ValueHint::FilePath)]
+    #[arg(short = 'o', long = "output")]
     output_file: Option<PathBuf>,
 
     /// Interval (in steps) between writing output
@@ -77,67 +81,60 @@ struct Config {
     no_graphics: bool,
 
     /// Window width
-    #[arg(long, default_value_t = 600)]
+    #[arg(long, default_value_t = 800)]
     width: u32,
 
     /// Window height
-    #[arg(long, default_value_t = 600)]
+    #[arg(long, default_value_t = 800)]
     height: u32,
 
     /// Point size for rendering bodies
-    #[arg(short = 'p', long, default_value_t = 1.0)]
+    #[arg(short = 'p', long, default_value_t = 2.0)]
     point_size: f32,
 }
 
 fn random_bodies(config: &Config) -> Vec<Body> {
     let mut rng = rand::thread_rng();
     let mut bodies = Vec::with_capacity(config.n_bodies);
-    
+
     // Create central body first
     bodies.push(Body::new(
         config.mzero,
         0.0, 0.0,  // position
         0.0, 0.0   // velocity
     ));
-    
+
     // Create remaining bodies
     for _ in 1..config.n_bodies {
-        let r = rng.gen::<f64>();
+        let r = rng.gen::<f64>() * 2.0 - 1.0; // Range [-1, 1]
         let theta = 2.0 * PI * rng.gen::<f64>();
-        
+
         let x = r * theta.cos();
         let y = r * theta.sin();
-        
+
         let mut vx = 0.0;
         let mut vy = 0.0;
-        
+
         if config.spin != 0.0 {
-            let spin_factor = config.spin * (1.0 + 0.1 * rng.gen::<f64>()) / (1.0 + r);
-            vx = theta.sin() * spin_factor;
-            vy = -theta.cos() * spin_factor;
+            let spin_factor = config.spin * (1.0 + 0.1 * rng.gen::<f64>()) / (1.0 + r.abs());
+            vx = -y * spin_factor; // Tangential velocity
+            vy = x * spin_factor;
         }
-        
+
         bodies.push(Body::new(config.mass, x, y, vx, vy));
     }
-    
+
     bodies
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let config = Config::parse();
-    
+fn run_simulation(mut config: Config) -> Result<(), Box<dyn std::error::Error>> {
     // Initialize bodies either from file or random distribution
     let bodies = if let Some(ref input_file) = config.input_file {
         read_bodies(input_file)?
     } else {
         random_bodies(&config)
     };
-    
-    // Initialize graphics if enabled
-    if !config.no_graphics {
-        init_window(config.width, config.height, config.point_size)?;
-    }
-    
+
     // Create simulation
     let mut simulation = Simulation::new(
         bodies,
@@ -146,7 +143,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.softening,
         config.tree_ratio
     );
-    
+
     // Print initial configuration using colorful output
     println!("{}",
         console::style("N-body Simulation Configuration")
@@ -163,58 +160,103 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         console::style(config.timestep).yellow()
     );
     println!("{}: {}", 
-        console::style("Tree ratio").cyan(),
-        console::style(config.tree_ratio).yellow()
+        console::style("Graphics").cyan(),
+        console::style(!config.no_graphics).yellow()
     );
-    println!("{}: {}", 
-        console::style("G").cyan(),
-        console::style(config.g).yellow()
-    );
-    println!("{}: {}", 
-        console::style("Softening factor").cyan(),
-        console::style(config.softening).yellow()
-    );
-    
+
     let mut step_count = 0;
     let mut sim_time = 0.0;
-    
-    // Progress indicator setup
-    let progress_style = console::Style::new().yellow().bold();
-    let progress_prefix = "Simulation time:";
-    
-    // Main simulation loop
-    while !config.no_graphics && window_open() || config.no_graphics {
-        sim_time += config.timestep;
-        simulation.step();
-        
-        step_count += 1;
-        if let Some(ref output_file) = config.output_file {
-            if config.write_interval != 0 && step_count % config.write_interval == 0 {
-                write_bodies(output_file, simulation.bodies(), config.timestep,
-                           config.g, config.softening, config.tree_ratio)?;
-            }
-        }
-        
-        // Update progress with colored output
-        print!("\r{} {}{:>12.6}", 
-            progress_prefix,
-            progress_style.apply_to(sim_time),
-            " "  // Extra space to clean up any leftovers
-        );
-        
-        if let Some(ref output_file) = config.output_file {
-            if step_count % config.write_interval == 0 {
-                print!(" (Saved to {})", 
-                    console::style(output_file.display()).bright().blue()
-                );
-            }
-        }
-    }
-    println!();  // Final newline
-    
+
     if !config.no_graphics {
-        close_window();
+        let event_loop = EventLoop::new();
+        let window = WindowBuilder::new()
+            .with_title("N-body Simulation")
+            .with_inner_size(winit::dpi::LogicalSize::new(
+                config.width as f64,
+                config.height as f64,
+            ))
+            .build(&event_loop)?;
+
+        // Initialize renderer
+        render::init_window(window, config.point_size)?;
+
+        // Run event loop
+        event_loop.run(move |event, _, control_flow| {
+            *control_flow = ControlFlow::Poll;
+
+            match event {
+                Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
+                    *control_flow = ControlFlow::Exit;
+                }
+                Event::MainEventsCleared => {
+                    // Update simulation
+                    simulation.step();
+                    step_count += 1;
+                    sim_time += config.timestep;
+
+                    // Save state if requested
+                    if let Some(ref output_file) = config.output_file {
+                        if step_count % config.write_interval == 0 {
+                            if let Err(e) = write_bodies(
+                                output_file,
+                                simulation.bodies(),
+                                config.timestep,
+                                config.g,
+                                config.softening,
+                                config.tree_ratio,
+                            ) {
+                                eprintln!("Error writing to file: {}", e);
+                            }
+                        }
+                    }
+
+                    // Update status
+                    print!("\r{} {:<12.6} seconds", 
+                        console::style("Simulation time:").cyan(),
+                        sim_time
+                    );
+
+                    // Render
+                    let tree = simulation.get_tree();
+                    render::draw(simulation.bodies(), &tree);
+                }
+                _ => (),
+            }
+        });
+    } else {
+        // Non-graphical simulation loop
+        loop {
+            simulation.step();
+            step_count += 1;
+            sim_time += config.timestep;
+
+            if let Some(ref output_file) = config.output_file {
+                if step_count % config.write_interval == 0 {
+                    write_bodies(
+                        output_file,
+                        simulation.bodies(),
+                        config.timestep,
+                        config.g,
+                        config.softening,
+                        config.tree_ratio,
+                    )?;
+                }
+            }
+
+            print!("\r{} {:<12.6} seconds", 
+                console::style("Simulation time:").cyan(),
+                sim_time
+            );
+        }
     }
-    
+
     Ok(())
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Parse command line arguments
+    let config = Config::parse();
+
+    // Run simulation
+    run_simulation(config)
 }

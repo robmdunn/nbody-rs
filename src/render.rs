@@ -1,383 +1,338 @@
 use std::ffi::CString;
+use std::num::NonZeroU32;
 use glutin::{
-    context::{PossiblyCurrentContext},
+    config::ConfigTemplateBuilder,
+    context::{ContextAttributesBuilder, PossiblyCurrentContext},
     display::GetGlDisplay,
     prelude::*,
-    surface::{Surface, WindowSurface, SurfaceAttributesBuilder},
-    context::{ContextApi, Version},
-    config::ConfigTemplateBuilder,
+    surface::{Surface, SwapInterval, WindowSurface},
 };
-use glutin_winit::DisplayBuilder;
+use glutin_winit::{DisplayBuilder,GlWindow};
+use raw_window_handle::HasRawWindowHandle;
 use winit::{
-    dpi::PhysicalSize,
     event_loop::EventLoop,
-    window::{Window, WindowAttributes},
-    raw_window_handle::{HasWindowHandle, HandleError},
+    window::{Window, WindowBuilder},
 };
-use std::{num::NonZeroU32, ptr};
-use std::sync::atomic::{AtomicBool, Ordering};
 use gl::types::*;
-use crate::{body::Body, tree::QuadTree};
+use crate::body::Body;
+use crate::tree::QuadTree;
 
-// Use atomics for safer state management
-static WINDOW_OPEN: AtomicBool = AtomicBool::new(false);
-static mut POINT_SIZE: f32 = 1.0;
+struct Renderer {
+    gl_context: PossiblyCurrentContext,
+    gl_surface: Surface<WindowSurface>,
+    vertex_buffer: u32,
+    vertex_array: u32,
+    program: u32,
+    projection_loc: i32,
+    color_loc: i32,
+    point_size: f32,
+    _window: Window,
+}
 
-// Shader sources
-const VS_SRC: &str = r#"
+const VERTEX_SHADER: &str = r#"
     #version 330 core
     layout (location = 0) in vec2 position;
     uniform mat4 projection;
+    uniform float point_size;
     void main() {
         gl_Position = projection * vec4(position.xy, 0.0, 1.0);
-        gl_PointSize = float(gl_PointSize);
+        gl_PointSize = point_size;
     }
 "#;
 
-const FS_SRC: &str = r#"
+const FRAGMENT_SHADER: &str = r#"
     #version 330 core
     uniform vec4 color;
     out vec4 FragColor;
     void main() {
+        vec2 circCoord = 2.0 * gl_PointCoord - 1.0;
+        float circle = dot(circCoord, circCoord);
+        if (circle > 1.0) {
+            discard;
+        }
         FragColor = color;
     }
 "#;
 
-struct RenderContext {
-    _window: Window,
-    context: PossiblyCurrentContext,
-    surface: Surface<WindowSurface>,
-    shader: Shader,
-    vao: GLuint,
-    vbo: GLuint,
-}
+static mut RENDERER: Option<Renderer> = None;
 
-struct Shader {
-    program: GLuint,
-    projection_loc: GLint,
-    color_loc: GLint,
-}
+impl Renderer {
+    fn new(window: Window, point_size: f32) -> Result<Self, String> {
+        let window_builder = WindowBuilder::new()
+            .with_title("N-body Simulation")
+            .with_inner_size(window.inner_size());
 
-impl Shader {
-    fn new() -> Result<Self, String> {
-        unsafe {
-            // Create vertex shader
-            let vs = gl::CreateShader(gl::VERTEX_SHADER);
-            let vs_src = CString::new(VS_SRC).unwrap();
-            gl::ShaderSource(vs, 1, &vs_src.as_ptr(), ptr::null());
-            gl::CompileShader(vs);
-            check_shader_error(vs, "vertex")?;
+        let template = ConfigTemplateBuilder::new()
+            .with_alpha_size(8)
+            .with_transparency(true);
 
-            // Create fragment shader
-            let fs = gl::CreateShader(gl::FRAGMENT_SHADER);
-            let fs_src = CString::new(FS_SRC).unwrap();
-            gl::ShaderSource(fs, 1, &fs_src.as_ptr(), ptr::null());
-            gl::CompileShader(fs);
-            check_shader_error(fs, "fragment")?;
-
-            // Create and link program
-            let program = gl::CreateProgram();
-            gl::AttachShader(program, vs);
-            gl::AttachShader(program, fs);
-            gl::LinkProgram(program);
-            check_shader_error(program, "program")?;
-
-            // Clean up shaders
-            gl::DeleteShader(vs);
-            gl::DeleteShader(fs);
-
-            // Get uniform locations
-            let projection_str = CString::new("projection").unwrap();
-            let color_str = CString::new("color").unwrap();
-            let projection_loc = gl::GetUniformLocation(program, projection_str.as_ptr());
-            let color_loc = gl::GetUniformLocation(program, color_str.as_ptr());
-
-            Ok(Shader {
-                program,
-                projection_loc,
-                color_loc,
+        let display_builder = DisplayBuilder::new().with_window_builder(Some(window_builder));
+        let event_loop = EventLoop::new();
+        let (window, gl_config) = display_builder
+            .build(&event_loop, template, |configs| {
+                configs
+                    .reduce(|accum, config| {
+                        let transparency_check = config.supports_transparency().unwrap_or(false)
+                            & !accum.supports_transparency().unwrap_or(false);
+                        if transparency_check || config.num_samples() > accum.num_samples() {
+                            config
+                        } else {
+                            accum
+                        }
+                    })
+                    .unwrap()
             })
+            .map_err(|e| format!("Failed to build window: {}", e))?;
+
+        let window = window.unwrap();
+        let raw_window_handle = window.raw_window_handle();
+
+        let gl_display = gl_config.display();
+        let context_attributes = ContextAttributesBuilder::new().build(Some(raw_window_handle));
+        let gl_context = unsafe {
+            gl_display
+                .create_context(&gl_config, &context_attributes)
+                .map_err(|e| format!("Failed to create context: {}", e))?
+        };
+
+        let attrs = window.build_surface_attributes(<_>::default());
+        let gl_surface = unsafe {
+            gl_display
+                .create_window_surface(&gl_config, &attrs)
+                .map_err(|e| format!("Failed to create surface: {}", e))?
+        };
+
+        let gl_context = gl_context.make_current(&gl_surface)
+            .map_err(|e| format!("Failed to make context current: {}", e))?;
+
+        gl::load_with(|s| {
+            let cstr = CString::new(s).unwrap();
+            gl_display.get_proc_address(&cstr)
+        });
+
+        unsafe {
+            gl_surface
+                .set_swap_interval(&gl_context, SwapInterval::Wait(NonZeroU32::new(1).unwrap()))
+                .map_err(|e| format!("Failed to set swap interval: {}", e))?;
         }
+
+        // Create and compile shaders
+        let vertex_shader = unsafe {
+            let shader = gl::CreateShader(gl::VERTEX_SHADER);
+            let c_str = CString::new(VERTEX_SHADER.as_bytes()).unwrap();
+            gl::ShaderSource(shader, 1, &c_str.as_ptr(), std::ptr::null());
+            gl::CompileShader(shader);
+            
+            let mut success = 0;
+            gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut success);
+            if success == 0 {
+                let mut len = 0;
+                gl::GetShaderiv(shader, gl::INFO_LOG_LENGTH, &mut len);
+                let mut buffer = Vec::with_capacity(len as usize);
+                buffer.set_len((len as usize) - 1);
+                gl::GetShaderInfoLog(shader, len, std::ptr::null_mut(), buffer.as_mut_ptr() as *mut _);
+                return Err(format!("Failed to compile vertex shader: {}", String::from_utf8_lossy(&buffer)));
+            }
+            shader
+        };
+
+        let fragment_shader = unsafe {
+            let shader = gl::CreateShader(gl::FRAGMENT_SHADER);
+            let c_str = CString::new(FRAGMENT_SHADER.as_bytes()).unwrap();
+            gl::ShaderSource(shader, 1, &c_str.as_ptr(), std::ptr::null());
+            gl::CompileShader(shader);
+            
+            let mut success = 0;
+            gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut success);
+            if success == 0 {
+                let mut len = 0;
+                gl::GetShaderiv(shader, gl::INFO_LOG_LENGTH, &mut len);
+                let mut buffer = Vec::with_capacity(len as usize);
+                buffer.set_len((len as usize) - 1);
+                gl::GetShaderInfoLog(shader, len, std::ptr::null_mut(), buffer.as_mut_ptr() as *mut _);
+                return Err(format!("Failed to compile fragment shader: {}", String::from_utf8_lossy(&buffer)));
+            }
+            shader
+        };
+
+        let program = unsafe {
+            let program = gl::CreateProgram();
+            gl::AttachShader(program, vertex_shader);
+            gl::AttachShader(program, fragment_shader);
+            gl::LinkProgram(program);
+            
+            let mut success = 0;
+            gl::GetProgramiv(program, gl::LINK_STATUS, &mut success);
+            if success == 0 {
+                let mut len = 0;
+                gl::GetProgramiv(program, gl::INFO_LOG_LENGTH, &mut len);
+                let mut buffer = Vec::with_capacity(len as usize);
+                buffer.set_len((len as usize) - 1);
+                gl::GetProgramInfoLog(program, len, std::ptr::null_mut(), buffer.as_mut_ptr() as *mut _);
+                return Err(format!("Failed to link shader program: {}", String::from_utf8_lossy(&buffer)));
+            }
+
+            gl::DeleteShader(vertex_shader);
+            gl::DeleteShader(fragment_shader);
+
+            program
+        };
+
+        let projection_loc = unsafe {
+            let name = CString::new("projection").unwrap();
+            gl::GetUniformLocation(program, name.as_ptr())
+        };
+
+        let color_loc = unsafe {
+            let name = CString::new("color").unwrap();
+            gl::GetUniformLocation(program, name.as_ptr())
+        };
+
+        let mut vertex_array = 0;
+        let mut vertex_buffer = 0;
+        
+        unsafe {
+            gl::GenVertexArrays(1, &mut vertex_array);
+            gl::BindVertexArray(vertex_array);
+
+            gl::GenBuffers(1, &mut vertex_buffer);
+            gl::BindBuffer(gl::ARRAY_BUFFER, vertex_buffer);
+
+            gl::EnableVertexAttribArray(0);
+            gl::VertexAttribPointer(
+                0,
+                2,
+                gl::FLOAT,
+                gl::FALSE,
+                0,
+                std::ptr::null(),
+            );
+        }
+
+        Ok(Renderer {
+            gl_context,
+            gl_surface,
+            vertex_buffer,
+            vertex_array,
+            program,
+            projection_loc,
+            color_loc,
+            point_size,
+            _window: window,
+        })
     }
 
-    fn use_program(&self) {
+    fn render(&self, bodies: &[Body], tree: &QuadTree) {
         unsafe {
+            gl::Clear(gl::COLOR_BUFFER_BIT);
             gl::UseProgram(self.program);
+
+            // Set up orthographic projection
+            let bounds = tree.get_bounds();
+            let scale = 1.0 / bounds.diagonal() as f32;
+            let projection = [
+                scale, 0.0, 0.0, 0.0,
+                0.0, scale, 0.0, 0.0,
+                0.0, 0.0, 1.0, 0.0,
+                0.0, 0.0, 0.0, 1.0f32,
+            ];
+            gl::UniformMatrix4fv(self.projection_loc, 1, gl::FALSE, projection.as_ptr());
+
+            // Draw quadtree
+            gl::Uniform4f(self.color_loc, 0.3, 0.3, 0.3, 0.5);
+            self.draw_tree(tree);
+
+            // Draw bodies
+            gl::Uniform4f(self.color_loc, 1.0, 1.0, 1.0, 1.0);
+            self.draw_bodies(bodies);
+
+            self.gl_surface.swap_buffers(&self.gl_context).unwrap();
         }
     }
 
-    fn set_color(&self, r: f32, g: f32, b: f32, a: f32) {
+    fn draw_tree(&self, tree: &QuadTree) {
+        let bounds = tree.get_bounds();
+        let vertices: Vec<f32> = vec![
+            bounds.min[0] as f32, bounds.min[1] as f32,
+            bounds.max[0] as f32, bounds.min[1] as f32,
+            bounds.max[0] as f32, bounds.max[1] as f32,
+            bounds.min[0] as f32, bounds.max[1] as f32,
+            bounds.min[0] as f32, bounds.min[1] as f32,
+        ];
+
         unsafe {
-            gl::Uniform4f(self.color_loc, r, g, b, a);
+            gl::BindBuffer(gl::ARRAY_BUFFER, self.vertex_buffer);
+            gl::BufferData(
+                gl::ARRAY_BUFFER,
+                (vertices.len() * std::mem::size_of::<f32>()) as GLsizeiptr,
+                vertices.as_ptr() as *const _,
+                gl::STREAM_DRAW,
+            );
+
+            gl::DrawArrays(gl::LINE_STRIP, 0, vertices.len() as i32 / 2);
+
+            // Recursively draw children
+            for child in tree.get_children().iter().flatten() {
+                self.draw_tree(child);
+            }
         }
     }
 
-    fn set_projection(&self, matrix: &[f32; 16]) {
+    fn draw_bodies(&self, bodies: &[Body]) {
+        let vertices: Vec<f32> = bodies
+            .iter()
+            .flat_map(|body| [body.position[0] as f32, body.position[1] as f32])
+            .collect();
+
         unsafe {
-            gl::UniformMatrix4fv(self.projection_loc, 1, gl::FALSE, matrix.as_ptr());
+            gl::BindBuffer(gl::ARRAY_BUFFER, self.vertex_buffer);
+            gl::BufferData(
+                gl::ARRAY_BUFFER,
+                (vertices.len() * std::mem::size_of::<f32>()) as GLsizeiptr,
+                vertices.as_ptr() as *const _,
+                gl::STREAM_DRAW,
+            );
+
+            gl::PointSize(self.point_size);
+            gl::DrawArrays(gl::POINTS, 0, bodies.len() as i32);
         }
     }
 }
 
-impl Drop for Shader {
+impl Drop for Renderer {
     fn drop(&mut self) {
         unsafe {
+            gl::DeleteVertexArrays(1, &self.vertex_array);
+            gl::DeleteBuffers(1, &self.vertex_buffer);
             gl::DeleteProgram(self.program);
         }
     }
 }
 
-static mut RENDER_CONTEXT: Option<RenderContext> = None;
-
-fn check_shader_error(shader: GLuint, kind: &str) -> Result<(), String> {
+pub fn init_window(window: Window, point_size: f32) -> Result<(), String> {
     unsafe {
-        let mut success = gl::FALSE as GLint;
-        let mut info_log = Vec::with_capacity(512);
-        info_log.set_len(512);
-
-        if kind == "program" {
-            gl::GetProgramiv(shader, gl::LINK_STATUS, &mut success);
-            if success != gl::TRUE as GLint {
-                gl::GetProgramInfoLog(
-                    shader,
-                    512,
-                    ptr::null_mut(),
-                    info_log.as_mut_ptr() as *mut GLchar,
-                );
-                return Err(format!(
-                    "Program linking failed: {}",
-                    String::from_utf8_lossy(&info_log)
-                ));
-            }
-        } else {
-            gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut success);
-            if success != gl::TRUE as GLint {
-                gl::GetShaderInfoLog(
-                    shader,
-                    512,
-                    ptr::null_mut(),
-                    info_log.as_mut_ptr() as *mut GLchar,
-                );
-                return Err(format!(
-                    "{} shader compilation failed: {}",
-                    kind,
-                    String::from_utf8_lossy(&info_log)
-                ));
-            }
+        if RENDERER.is_some() {
+            return Err("Renderer already initialized".to_string());
         }
-        Ok(())
+        RENDERER = Some(Renderer::new(window, point_size)?);
     }
-}
-
-pub fn init_window(width: u32, height: u32, point_size: f32) -> Result<(), String> {
-    let event_loop = EventLoop::new().map_err(|e| format!("Failed to create event loop: {}", e))?;
-    
-    let mut attributes = Window::default_attributes();
-    attributes.inner_size = Some(PhysicalSize::new(width, height).into());
-    attributes.title = "N-body Simulation".to_string();
-
-    let template = ConfigTemplateBuilder::new()
-        .with_alpha_size(8)
-        .with_transparency(true);
-
-    let display_builder = DisplayBuilder::new()
-        .with_window_attributes(Some(attributes));
-
-    let (window, gl_config) = display_builder
-        .build(&event_loop, template, |configs| {
-            configs
-                .reduce(|accum, config| {
-                    if config.num_samples() > accum.num_samples() {
-                        config
-                    } else {
-                        accum
-                    }
-                })
-                .unwrap()
-        })
-        .map_err(|e| format!("Failed to build window: {}", e))?;
-
-    let window = window.unwrap();
-    let window_handle = window.window_handle()
-        .map_err(|e| format!("Failed to get window handle: {}", e))?;
-
-    let context_attributes = glutin::context::ContextAttributesBuilder::new()
-        .with_context_api(ContextApi::OpenGl(Some(Version::new(3, 3))))
-        .build(Some(window_handle.into()));
-
-    let surface_attributes = SurfaceAttributesBuilder::<WindowSurface>::new()
-        .with_srgb(Some(true))
-        .build(
-            window_handle.into(),
-            NonZeroU32::new(width).unwrap(),
-            NonZeroU32::new(height).unwrap(),
-        );
-
-    let gl_display = gl_config.display();
-    let gl_surface = unsafe {
-        gl_display
-            .create_window_surface(&gl_config, &surface_attributes)
-            .map_err(|e| format!("Failed to create surface: {}", e))?
-    };
-
-    let context = unsafe {
-        gl_display
-            .create_context(&gl_config, &context_attributes)
-            .map_err(|e| format!("Failed to create context: {}", e))?
-            .make_current(&gl_surface)
-            .map_err(|e| format!("Failed to make context current: {}", e))?
-    };
-
-    // Initialize GL
-    gl::load_with(|symbol| {
-        let c_str = CString::new(symbol).unwrap();
-        gl_display.get_proc_address(&c_str)
-    });
-
-    unsafe {
-        POINT_SIZE = point_size;
-
-        // OpenGL initialization
-        gl::Enable(gl::BLEND);
-        gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
-        gl::ClearColor(0.0, 0.0, 0.1, 1.0);
-
-        // Create and bind VAO and VBO
-        let mut vao = 0;
-        let mut vbo = 0;
-        gl::GenVertexArrays(1, &mut vao);
-        gl::GenBuffers(1, &mut vbo);
-        gl::BindVertexArray(vao);
-        gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
-
-        // Set up vertex attributes
-        gl::EnableVertexAttribArray(0);
-        gl::VertexAttribPointer(
-            0,
-            2,
-            gl::FLOAT,
-            gl::FALSE,
-            0,
-            ptr::null(),
-        );
-
-        // Create shader program
-        let shader = Shader::new()?;
-
-        RENDER_CONTEXT = Some(RenderContext {
-            _window: window,
-            context,
-            surface: gl_surface,
-            shader,
-            vao,
-            vbo,
-        });
-
-        WINDOW_OPEN.store(true, Ordering::SeqCst);
-    }
-
     Ok(())
 }
 
 pub fn draw(bodies: &[Body], tree: &QuadTree) {
     unsafe {
-        if let Some(ref context) = RENDER_CONTEXT {
-            // Clear the screen
-            gl::Clear(gl::COLOR_BUFFER_BIT);
-
-            context.shader.use_program();
-
-            // Set up    orthographic projection
-            let projection = [
-                1.0, 0.0, 0.0, 0.0,
-                0.0, 1.0, 0.0, 0.0,
-                0.0, 0.0, 1.0, 0.0,
-                0.0, 0.0, 0.0, 1.0,
-            ];
-            context.shader.set_projection(&projection);
-
-            // Draw quad tree
-            draw_tree(tree, context);
-
-            // Draw bodies
-            draw_bodies(bodies, context);
-
-            // Swap buffers
-            context.surface
-                .swap_buffers(&context.context)
-                .expect("Failed to swap buffers");
+        if let Some(ref renderer) = RENDERER {
+            renderer.render(bodies, tree);
         }
     }
-}
-
-fn draw_tree(tree: &QuadTree, context: &RenderContext) {
-    // Set tree color
-    context.shader.set_color(0.3, 0.3, 0.3, 0.5);
-
-    // Draw tree bounds
-    let bounds = tree.get_bounds();
-    let vertices: Vec<f32> = vec![
-        bounds.min[0] as f32, bounds.min[1] as f32,
-        bounds.max[0] as f32, bounds.min[1] as f32,
-        bounds.max[0] as f32, bounds.max[1] as f32,
-        bounds.min[0] as f32, bounds.max[1] as f32,
-        bounds.min[0] as f32, bounds.min[1] as f32,
-    ];
-
-    unsafe {
-        gl::BindBuffer(gl::ARRAY_BUFFER, context.vbo);
-        gl::BufferData(
-            gl::ARRAY_BUFFER,
-            (vertices.len() * std::mem::size_of::<f32>()) as GLsizeiptr,
-            vertices.as_ptr() as *const _,
-            gl::STREAM_DRAW,
-        );
-
-        gl::DrawArrays(gl::LINE_STRIP, 0, vertices.len() as i32 / 2);
-
-        // Recursively draw children
-        for child in tree.get_children().iter().flatten() {
-            draw_tree(child, context);
-        }
-    }
-}
-
-fn draw_bodies(bodies: &[Body], context: &RenderContext) {
-    // Set body color
-    context.shader.set_color(1.0, 1.0, 1.0, 1.0);
-
-    // Prepare vertex data by converting f64 positions to f32
-    let vertices: Vec<f32> = bodies.iter()
-        .flat_map(|body| [
-            body.position[0] as f32,
-            body.position[1] as f32
-        ])
-        .collect();
-
-    unsafe {
-        gl::BindBuffer(gl::ARRAY_BUFFER, context.vbo);
-        gl::BufferData(
-            gl::ARRAY_BUFFER,
-            (vertices.len() * std::mem::size_of::<f32>()) as GLsizeiptr,
-            vertices.as_ptr() as *const _,
-            gl::STREAM_DRAW,
-        );
-
-        gl::PointSize(POINT_SIZE);
-        gl::DrawArrays(gl::POINTS, 0, bodies.len() as i32);
-    }
-}
-
-pub fn window_open() -> bool {
-    WINDOW_OPEN.load(Ordering::SeqCst)
 }
 
 pub fn close_window() {
     unsafe {
-        WINDOW_OPEN.store(false, Ordering::SeqCst);
-        if let Some(context) = RENDER_CONTEXT.take() {
-            gl::DeleteVertexArrays(1, &context.vao);
-            gl::DeleteBuffers(1, &context.vbo);
-        }
+        RENDERER = None;
     }
+}
+
+pub fn window_open() -> bool {
+    unsafe { RENDERER.is_some() }
 }

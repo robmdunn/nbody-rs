@@ -5,9 +5,9 @@ edition = "2021"
 
 [dependencies]
 rayon = "1.8"     # For parallel iterators (replacing OpenMP)
-winit = "0.30"    # Window creation
-glutin = "0.32"   # OpenGL context creation
-glutin-winit = "0.5"  # Glutin-winit integration
+glutin = "0.30"  # Not 0.32
+winit = "0.28"   # Not 0.30
+glutin-winit = "0.3"  # Not 0.5
 gl = "0.14"       # OpenGL bindings
 raw-window-handle = "0.5"  # Window handle types
 rand = "0.8"      # For random number generation
