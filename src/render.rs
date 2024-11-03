@@ -7,7 +7,7 @@ use glutin::{
     prelude::*,
     surface::{Surface, SwapInterval, WindowSurface},
 };
-use glutin_winit::{DisplayBuilder,GlWindow};
+use glutin_winit::{DisplayBuilder, GlWindow};
 use raw_window_handle::HasRawWindowHandle;
 use winit::{
     event_loop::EventLoop,
@@ -57,17 +57,19 @@ const FRAGMENT_SHADER: &str = r#"
 static mut RENDERER: Option<Renderer> = None;
 
 impl Renderer {
-    fn new(window: Window, point_size: f32) -> Result<Self, String> {
+    fn new(event_loop: &EventLoop<()>, window_size: (u32, u32), point_size: f32) -> Result<Self, String> {
         let window_builder = WindowBuilder::new()
             .with_title("N-body Simulation")
-            .with_inner_size(window.inner_size());
+            .with_inner_size(winit::dpi::LogicalSize::new(
+                window_size.0 as f64,
+                window_size.1 as f64,
+            ));
 
         let template = ConfigTemplateBuilder::new()
             .with_alpha_size(8)
             .with_transparency(true);
 
         let display_builder = DisplayBuilder::new().with_window_builder(Some(window_builder));
-        let event_loop = EventLoop::new();
         let (window, gl_config) = display_builder
             .build(&event_loop, template, |configs| {
                 configs
@@ -122,7 +124,7 @@ impl Renderer {
             let c_str = CString::new(VERTEX_SHADER.as_bytes()).unwrap();
             gl::ShaderSource(shader, 1, &c_str.as_ptr(), std::ptr::null());
             gl::CompileShader(shader);
-            
+
             let mut success = 0;
             gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut success);
             if success == 0 {
@@ -160,21 +162,8 @@ impl Renderer {
             gl::AttachShader(program, vertex_shader);
             gl::AttachShader(program, fragment_shader);
             gl::LinkProgram(program);
-            
-            let mut success = 0;
-            gl::GetProgramiv(program, gl::LINK_STATUS, &mut success);
-            if success == 0 {
-                let mut len = 0;
-                gl::GetProgramiv(program, gl::INFO_LOG_LENGTH, &mut len);
-                let mut buffer = Vec::with_capacity(len as usize);
-                buffer.set_len((len as usize) - 1);
-                gl::GetProgramInfoLog(program, len, std::ptr::null_mut(), buffer.as_mut_ptr() as *mut _);
-                return Err(format!("Failed to link shader program: {}", String::from_utf8_lossy(&buffer)));
-            }
-
             gl::DeleteShader(vertex_shader);
             gl::DeleteShader(fragment_shader);
-
             program
         };
 
@@ -190,7 +179,7 @@ impl Renderer {
 
         let mut vertex_array = 0;
         let mut vertex_buffer = 0;
-        
+
         unsafe {
             gl::GenVertexArrays(1, &mut vertex_array);
             gl::BindVertexArray(vertex_array);
@@ -239,7 +228,7 @@ impl Renderer {
             gl::UniformMatrix4fv(self.projection_loc, 1, gl::FALSE, projection.as_ptr());
 
             // Draw quadtree
-            gl::Uniform4f(self.color_loc, 0.3, 0.3, 0.3, 0.5);
+            gl::Uniform4f(self.color_loc, 0.7, 0.7, 0.7, 0.5);
             self.draw_tree(tree);
 
             // Draw bodies
@@ -309,12 +298,12 @@ impl Drop for Renderer {
     }
 }
 
-pub fn init_window(window: Window, point_size: f32) -> Result<(), String> {
+pub fn init_window(event_loop: &EventLoop<()>, width: u32, height: u32, point_size: f32) -> Result<(), String> {
     unsafe {
         if RENDERER.is_some() {
             return Err("Renderer already initialized".to_string());
         }
-        RENDERER = Some(Renderer::new(window, point_size)?);
+        RENDERER = Some(Renderer::new(event_loop, (width, height), point_size)?);
     }
     Ok(())
 }

@@ -169,16 +169,9 @@ fn run_simulation(mut config: Config) -> Result<(), Box<dyn std::error::Error>> 
 
     if !config.no_graphics {
         let event_loop = EventLoop::new();
-        let window = WindowBuilder::new()
-            .with_title("N-body Simulation")
-            .with_inner_size(winit::dpi::LogicalSize::new(
-                config.width as f64,
-                config.height as f64,
-            ))
-            .build(&event_loop)?;
-
-        // Initialize renderer
-        render::init_window(window, config.point_size)?;
+        
+        // Initialize renderer first
+        render::init_window(&event_loop, config.width, config.height, config.point_size)?;
 
         // Run event loop
         event_loop.run(move |event, _, control_flow| {
