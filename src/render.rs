@@ -71,7 +71,7 @@ impl Renderer {
 
         let display_builder = DisplayBuilder::new().with_window_builder(Some(window_builder));
         let (window, gl_config) = display_builder
-            .build(&event_loop, template, |configs| {
+            .build(event_loop, template, |configs| {
                 configs
                     .reduce(|accum, config| {
                         let transparency_check = config.supports_transparency().unwrap_or(false)
@@ -112,50 +112,42 @@ impl Renderer {
             gl_display.get_proc_address(&cstr)
         });
 
-        unsafe {
-            gl_surface
-                .set_swap_interval(&gl_context, SwapInterval::Wait(NonZeroU32::new(1).unwrap()))
-                .map_err(|e| format!("Failed to set swap interval: {}", e))?;
+        gl_surface
+            .set_swap_interval(&gl_context, SwapInterval::Wait(NonZeroU32::new(1).unwrap()))
+            .map_err(|e| format!("Failed to set swap interval: {}", e))?;
+
+        fn compile_shader(shader_type: GLenum, source: &str) -> Result<GLuint, String> {
+            unsafe {
+                let shader = gl::CreateShader(shader_type);
+                let c_str = CString::new(source.as_bytes()).unwrap();
+                gl::ShaderSource(shader, 1, &c_str.as_ptr(), std::ptr::null());
+                gl::CompileShader(shader);
+        
+                // Check compilation status
+                let mut success = 0;
+                gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut success);
+                if success == 0 {
+                    let mut len = 0;
+                    gl::GetShaderiv(shader, gl::INFO_LOG_LENGTH, &mut len);
+                    
+                    // Create a properly initialized buffer with zeros
+                    let mut buffer = vec![0u8; len as usize];
+                    gl::GetShaderInfoLog(
+                        shader,
+                        len,
+                        std::ptr::null_mut(),
+                        buffer.as_mut_ptr() as *mut _
+                    );
+                    
+                    return Err(String::from_utf8_lossy(&buffer).into_owned());
+                }
+                Ok(shader)
+            }
         }
-
-        // Create and compile shaders
-        let vertex_shader = unsafe {
-            let shader = gl::CreateShader(gl::VERTEX_SHADER);
-            let c_str = CString::new(VERTEX_SHADER.as_bytes()).unwrap();
-            gl::ShaderSource(shader, 1, &c_str.as_ptr(), std::ptr::null());
-            gl::CompileShader(shader);
-
-            let mut success = 0;
-            gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut success);
-            if success == 0 {
-                let mut len = 0;
-                gl::GetShaderiv(shader, gl::INFO_LOG_LENGTH, &mut len);
-                let mut buffer = Vec::with_capacity(len as usize);
-                buffer.set_len((len as usize) - 1);
-                gl::GetShaderInfoLog(shader, len, std::ptr::null_mut(), buffer.as_mut_ptr() as *mut _);
-                return Err(format!("Failed to compile vertex shader: {}", String::from_utf8_lossy(&buffer)));
-            }
-            shader
-        };
-
-        let fragment_shader = unsafe {
-            let shader = gl::CreateShader(gl::FRAGMENT_SHADER);
-            let c_str = CString::new(FRAGMENT_SHADER.as_bytes()).unwrap();
-            gl::ShaderSource(shader, 1, &c_str.as_ptr(), std::ptr::null());
-            gl::CompileShader(shader);
-            
-            let mut success = 0;
-            gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut success);
-            if success == 0 {
-                let mut len = 0;
-                gl::GetShaderiv(shader, gl::INFO_LOG_LENGTH, &mut len);
-                let mut buffer = Vec::with_capacity(len as usize);
-                buffer.set_len((len as usize) - 1);
-                gl::GetShaderInfoLog(shader, len, std::ptr::null_mut(), buffer.as_mut_ptr() as *mut _);
-                return Err(format!("Failed to compile fragment shader: {}", String::from_utf8_lossy(&buffer)));
-            }
-            shader
-        };
+        
+        // Then update the vertex_shader and fragment_shader creation to use this function:
+        let vertex_shader = compile_shader(gl::VERTEX_SHADER, VERTEX_SHADER)?;
+        let fragment_shader = compile_shader(gl::FRAGMENT_SHADER, FRAGMENT_SHADER)?;
 
         let program = unsafe {
             let program = gl::CreateProgram();
@@ -228,7 +220,7 @@ impl Renderer {
             gl::UniformMatrix4fv(self.projection_loc, 1, gl::FALSE, projection.as_ptr());
 
             // Draw quadtree
-            gl::Uniform4f(self.color_loc, 0.7, 0.7, 0.7, 0.5);
+            gl::Uniform4f(self.color_loc, 0.3, 0.3, 0.3, 0.5);
             self.draw_tree(tree);
 
             // Draw bodies

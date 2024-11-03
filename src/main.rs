@@ -3,8 +3,7 @@ use rand::prelude::*;
 use std::path::PathBuf;
 use winit::{
     event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
+    event_loop::{ControlFlow, EventLoop}
 };
 
 mod body;
@@ -127,7 +126,7 @@ fn random_bodies(config: &Config) -> Vec<Body> {
     bodies
 }
 
-fn run_simulation(mut config: Config) -> Result<(), Box<dyn std::error::Error>> {
+fn run_simulation(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     // Initialize bodies either from file or random distribution
     let bodies = if let Some(ref input_file) = config.input_file {
         read_bodies(input_file)?
