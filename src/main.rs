@@ -1,6 +1,7 @@
 use clap::Parser;
 use rand::prelude::*;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop}
@@ -25,6 +26,7 @@ const DEFAULT_SPIN: f64 = 0.05;
 const DEFAULT_MZERO: f64 = 1.0e7;
 const DEFAULT_TREE_RATIO: f64 = 3.0;
 const DEFAULT_WRITE_INTERVAL: usize = 100;
+const FRAME_TIME: Duration = Duration::from_micros(66666); // Approximately 1/30th second
 const PI: f64 = std::f32::consts::PI as f64;
 
 /// Barnes-Hut N-body gravitational simulation
@@ -126,6 +128,67 @@ fn random_bodies(config: &Config) -> Vec<Body> {
     bodies
 }
 
+struct SimulationState {
+    simulation: Simulation,
+    step_count: usize,
+    sim_time: f64,
+    last_render: Instant,
+    last_save: usize,
+}
+
+impl SimulationState {
+    fn new(simulation: Simulation) -> Self {
+        SimulationState {
+            simulation,
+            step_count: 0,
+            sim_time: 0.0,
+            last_render: Instant::now(),
+            last_save: 0,
+        }
+    }
+
+    fn update(&mut self, config: &Config) -> Result<(), String> {
+        self.simulation.step();
+        self.step_count += 1;
+        self.sim_time += config.timestep;
+
+        // Save state if requested
+        if let Some(ref output_file) = config.output_file {
+            if self.step_count % config.write_interval == 0 {
+                write_bodies(
+                    output_file,
+                    self.simulation.bodies(),
+                    config.timestep,
+                    config.g,
+                    config.softening,
+                    config.tree_ratio,
+                )?;
+                self.last_save = self.step_count;
+            }
+        }
+
+        // Update status line
+        print!("\r{} {:<12.6} seconds", 
+            console::style("Simulation time:").cyan(),
+            self.sim_time
+        );
+
+        Ok(())
+    }
+
+    fn should_render(&self) -> bool {
+        self.last_render.elapsed() >= FRAME_TIME
+    }
+
+    fn render(&mut self) {
+        if render::window_open() {
+            let tree = self.simulation.get_tree();
+            render::draw(self.simulation.bodies(), &tree);
+            self.last_render = Instant::now();
+        }
+    }
+}
+
 fn run_simulation(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     // Initialize bodies either from file or random distribution
     let bodies = if let Some(ref input_file) = config.input_file {
@@ -135,7 +198,7 @@ fn run_simulation(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Create simulation
-    let mut simulation = Simulation::new(
+    let simulation = Simulation::new(
         bodies,
         config.timestep,
         config.g,
@@ -143,7 +206,7 @@ fn run_simulation(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         config.tree_ratio
     );
 
-    // Print initial configuration using colorful output
+    // Print initial configuration
     println!("{}",
         console::style("N-body Simulation Configuration")
             .bold()
@@ -163,16 +226,12 @@ fn run_simulation(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         console::style(!config.no_graphics).yellow()
     );
 
-    let mut step_count = 0;
-    let mut sim_time = 0.0;
+    let mut state = SimulationState::new(simulation);
 
     if !config.no_graphics {
         let event_loop = EventLoop::new();
-        
-        // Initialize renderer first
         render::init_window(&event_loop, config.width, config.height, config.point_size)?;
 
-        // Run event loop
         event_loop.run(move |event, _, control_flow| {
             *control_flow = ControlFlow::Poll;
 
@@ -181,36 +240,17 @@ fn run_simulation(config: Config) -> Result<(), Box<dyn std::error::Error>> {
                     *control_flow = ControlFlow::Exit;
                 }
                 Event::MainEventsCleared => {
-                    // Update simulation
-                    simulation.step();
-                    step_count += 1;
-                    sim_time += config.timestep;
-
-                    // Save state if requested
-                    if let Some(ref output_file) = config.output_file {
-                        if step_count % config.write_interval == 0 {
-                            if let Err(e) = write_bodies(
-                                output_file,
-                                simulation.bodies(),
-                                config.timestep,
-                                config.g,
-                                config.softening,
-                                config.tree_ratio,
-                            ) {
-                                eprintln!("Error writing to file: {}", e);
-                            }
-                        }
+                    // Always update simulation
+                    if let Err(e) = state.update(&config) {
+                        eprintln!("Error updating simulation: {}", e);
+                        *control_flow = ControlFlow::Exit;
+                        return;
                     }
 
-                    // Update status
-                    print!("\r{} {:<12.6} seconds", 
-                        console::style("Simulation time:").cyan(),
-                        sim_time
-                    );
-
-                    // Render
-                    let tree = simulation.get_tree();
-                    render::draw(simulation.bodies(), &tree);
+                    // Only render if enough time has passed
+                    if state.should_render() {
+                        state.render();
+                    }
                 }
                 _ => (),
             }
@@ -218,27 +258,10 @@ fn run_simulation(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     } else {
         // Non-graphical simulation loop
         loop {
-            simulation.step();
-            step_count += 1;
-            sim_time += config.timestep;
-
-            if let Some(ref output_file) = config.output_file {
-                if step_count % config.write_interval == 0 {
-                    write_bodies(
-                        output_file,
-                        simulation.bodies(),
-                        config.timestep,
-                        config.g,
-                        config.softening,
-                        config.tree_ratio,
-                    )?;
-                }
+            if let Err(e) = state.update(&config) {
+                eprintln!("Error updating simulation: {}", e);
+                break;
             }
-
-            print!("\r{} {:<12.6} seconds", 
-                console::style("Simulation time:").cyan(),
-                sim_time
-            );
         }
     }
 
@@ -246,9 +269,6 @@ fn run_simulation(config: Config) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Parse command line arguments
     let config = Config::parse();
-
-    // Run simulation
     run_simulation(config)
 }

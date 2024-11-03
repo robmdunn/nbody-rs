@@ -39,8 +39,8 @@ impl Bounds {
             Bounds::new([self.min[0], center[1]], [center[0], self.max[1]]),
             // Quadrant 3 (bottom left)
             Bounds::new([self.min[0], self.min[1]], [center[0], center[1]]),
-            // Quadrant 4 (bottom right)
-            Bounds::new([center[0], self.min[1]], [center[0], center[1]]),
+            // Quadrant 4 (bottom right) - FIXED
+            Bounds::new([center[0], self.min[1]], [self.max[0], center[1]]),
         ]
     }
 }
@@ -65,7 +65,7 @@ impl QuadTree {
         }
     }
 
-    pub fn insert(&mut self, mut body: Body) {
+    pub fn insert(&mut self, body: Body) {
         // If this node is empty, store the body here
         if self.total_mass == 0.0 {
             self.total_mass = body.mass;
@@ -159,7 +159,7 @@ impl QuadTree {
             let force = (g * body.mass * self.total_mass) / (distance_sq + softening);
             let force_x = force * dx / distance;
             let force_y = force * dy / distance;
-            
+
             return [force_x, force_y];
         }
 

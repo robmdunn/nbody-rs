@@ -27,37 +27,49 @@ impl Simulation {
     }
 
     /// Calculate the boundaries that contain all bodies
-    fn calculate_bounds(&self) -> Bounds {
-        let mut min_x = f64::INFINITY;
-        let mut min_y = f64::INFINITY;
-        let mut max_x = f64::NEG_INFINITY;
-        let mut max_y = f64::NEG_INFINITY;
+    fn compute_bounds(&self) -> Bounds {
+        if self.bodies.is_empty() {
+            return Bounds::new([-1.0, -1.0], [1.0, 1.0]); // Default bounds for empty system
+        }
 
-        for body in &self.bodies {
+        // Start with the first body's position
+        let first_pos = self.bodies[0].position;
+        let mut min_x = first_pos[0];
+        let mut min_y = first_pos[1];
+        let mut max_x = first_pos[0];
+        let mut max_y = first_pos[1];
+
+        // Find the actual extents of all bodies
+        for body in &self.bodies[1..] {
             min_x = min_x.min(body.position[0]);
             min_y = min_y.min(body.position[1]);
             max_x = max_x.max(body.position[0]);
             max_y = max_y.max(body.position[1]);
         }
 
-        // Add some padding to ensure bodies at the edges are handled correctly
-        let padding = ((max_x - min_x) + (max_y - min_y)).max(1e-6) * 0.01;
-        Bounds::new(
-            [min_x - padding, min_y - padding],
-            [max_x + padding, max_y + padding]
-        )
+        // Handle the case where all bodies are at exactly the same point
+        if (max_x - min_x).abs() < f64::EPSILON {
+            max_x += f64::EPSILON;
+            min_x -= f64::EPSILON;
+        }
+        if (max_y - min_y).abs() < f64::EPSILON {
+            max_y += f64::EPSILON;
+            min_y -= f64::EPSILON;
+        }
+
+        Bounds::new([min_x, min_y], [max_x, max_y])
     }
 
     /// Build the quad tree from the current body positions
     fn build_tree(&self) -> QuadTree {
-        let bounds = self.calculate_bounds();
+        let bounds = self.compute_bounds();
         let mut tree = QuadTree::new(bounds);
-        
+
         // Insert all bodies into the tree
         for body in &self.bodies {
             tree.insert(body.clone());
         }
-        
+
         tree
     }
 
@@ -68,13 +80,16 @@ impl Simulation {
 
         // Calculate forces/accelerations in parallel
         self.bodies.par_iter_mut().for_each(|body| {
+            // Reset acceleration to zero before calculating new forces
+            body.acceleration = [0.0, 0.0];
+            
             let force = tree.calculate_force(
                 body,
                 self.g,
                 self.softening,
                 self.tree_threshold
             );
-            
+
             // F = ma -> a = F/m
             body.acceleration = [
                 force[0] / body.mass,
@@ -101,10 +116,8 @@ impl Simulation {
     pub fn step(&mut self) {
         // Calculate new accelerations
         self.calculate_accelerations();
-        
+
         // Update velocities and positions
-        // Note: in a more sophisticated implementation, we might want to use
-        // a better integration method like leap-frog or RK4
         self.update_velocities();
         self.update_positions();
     }
@@ -130,19 +143,31 @@ mod tests {
     }
 
     #[test]
-    fn test_bounds_calculation() {
+    fn test_bounds_growth() {
+        // Create two bodies moving outward
         let bodies = vec![
-            Body::new(1.0, -1.0, -1.0, 0.0, 0.0),
-            Body::new(1.0, 1.0, 1.0, 0.0, 0.0),
+            Body::new(1.0, -1.0, -1.0, -1.0, -1.0),  // Moving left and down
+            Body::new(1.0, 1.0, 1.0, 1.0, 1.0),      // Moving right and up
         ];
-        let sim = Simulation::new(bodies, 0.1, 1.0, 0.001, 0.5);
-        let bounds = sim.calculate_bounds();
+        let mut sim = Simulation::new(bodies, 0.1, 0.0, 0.001, 0.5);  // Set g=0 to prevent attraction
         
-        // Check bounds with padding
-        assert!(bounds.min[0] < -1.0);
-        assert!(bounds.min[1] < -1.0);
-        assert!(bounds.max[0] > 1.0);
-        assert!(bounds.max[1] > 1.0);
+        // Get initial bounds
+        let initial_bounds = sim.get_tree().get_bounds().clone();
+        
+        // Step simulation several times
+        for _ in 0..10 {
+            sim.step();
+        }
+        
+        // Get new bounds
+        let binding = sim.get_tree();
+        let new_bounds = binding.get_bounds();
+        
+        // Verify bounds have grown
+        assert!(new_bounds.min[0] < initial_bounds.min[0]);
+        assert!(new_bounds.min[1] < initial_bounds.min[1]);
+        assert!(new_bounds.max[0] > initial_bounds.max[0]);
+        assert!(new_bounds.max[1] > initial_bounds.max[1]);
     }
 
     #[test]
@@ -152,16 +177,16 @@ mod tests {
             Body::new(1.0, -0.5, 0.0, 0.0, 0.0),
             Body::new(1.0, 0.5, 0.0, 0.0, 0.0),
         ];
-        
+
         let mut sim = Simulation::new(bodies, 0.1, 1.0, 0.001, 0.5);
-        
+
         // Store initial positions
         let initial_x1 = sim.bodies[0].position[0];
         let initial_x2 = sim.bodies[1].position[0];
-        
+
         // Run one step
         sim.step();
-        
+
         // Bodies should move towards each other
         assert!(sim.bodies[0].position[0] > initial_x1);
         assert!(sim.bodies[1].position[0] < initial_x2);

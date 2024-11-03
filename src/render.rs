@@ -17,13 +17,12 @@ use gl::types::*;
 use crate::body::Body;
 use crate::tree::QuadTree;
 
-struct Renderer {
+pub struct Renderer {
     gl_context: PossiblyCurrentContext,
     gl_surface: Surface<WindowSurface>,
     vertex_buffer: u32,
     vertex_array: u32,
     program: u32,
-    projection_loc: i32,
     color_loc: i32,
     point_size: f32,
     _window: Window,
@@ -32,11 +31,9 @@ struct Renderer {
 const VERTEX_SHADER: &str = r#"
     #version 330 core
     layout (location = 0) in vec2 position;
-    uniform mat4 projection;
-    uniform float point_size;
     void main() {
-        gl_Position = projection * vec4(position.xy, 0.0, 1.0);
-        gl_PointSize = point_size;
+        gl_Position = vec4(position.xy, 0.0, 1.0);
+        gl_PointSize = 1.0;
     }
 "#;
 
@@ -45,11 +42,6 @@ const FRAGMENT_SHADER: &str = r#"
     uniform vec4 color;
     out vec4 FragColor;
     void main() {
-        vec2 circCoord = 2.0 * gl_PointCoord - 1.0;
-        float circle = dot(circCoord, circCoord);
-        if (circle > 1.0) {
-            discard;
-        }
         FragColor = color;
     }
 "#;
@@ -104,7 +96,8 @@ impl Renderer {
                 .map_err(|e| format!("Failed to create surface: {}", e))?
         };
 
-        let gl_context = gl_context.make_current(&gl_surface)
+        let gl_context = gl_context
+            .make_current(&gl_surface)
             .map_err(|e| format!("Failed to make context current: {}", e))?;
 
         gl::load_with(|s| {
@@ -116,129 +109,150 @@ impl Renderer {
             .set_swap_interval(&gl_context, SwapInterval::Wait(NonZeroU32::new(1).unwrap()))
             .map_err(|e| format!("Failed to set swap interval: {}", e))?;
 
-        fn compile_shader(shader_type: GLenum, source: &str) -> Result<GLuint, String> {
-            unsafe {
-                let shader = gl::CreateShader(shader_type);
-                let c_str = CString::new(source.as_bytes()).unwrap();
-                gl::ShaderSource(shader, 1, &c_str.as_ptr(), std::ptr::null());
-                gl::CompileShader(shader);
-        
-                // Check compilation status
-                let mut success = 0;
-                gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut success);
-                if success == 0 {
-                    let mut len = 0;
-                    gl::GetShaderiv(shader, gl::INFO_LOG_LENGTH, &mut len);
-                    
-                    // Create a properly initialized buffer with zeros
-                    let mut buffer = vec![0u8; len as usize];
-                    gl::GetShaderInfoLog(
-                        shader,
-                        len,
-                        std::ptr::null_mut(),
-                        buffer.as_mut_ptr() as *mut _
-                    );
-                    
-                    return Err(String::from_utf8_lossy(&buffer).into_owned());
-                }
-                Ok(shader)
-            }
-        }
-        
-        // Then update the vertex_shader and fragment_shader creation to use this function:
-        let vertex_shader = compile_shader(gl::VERTEX_SHADER, VERTEX_SHADER)?;
-        let fragment_shader = compile_shader(gl::FRAGMENT_SHADER, FRAGMENT_SHADER)?;
+        unsafe {
+            // Basic OpenGL setup
+            gl::Disable(gl::DEPTH_TEST);
+            gl::Enable(gl::BLEND);
+            gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
+            gl::ClearColor(0.0, 0.0, 0.1, 1.0);
 
-        let program = unsafe {
+            println!("Creating shaders...");
+            
+            // Create and compile shaders
+            let vertex_shader = compile_shader(gl::VERTEX_SHADER, VERTEX_SHADER)?;
+            let fragment_shader = compile_shader(gl::FRAGMENT_SHADER, FRAGMENT_SHADER)?;
+
+            println!("Shaders compiled successfully. Creating program...");
+
+            // Create and link program
             let program = gl::CreateProgram();
             gl::AttachShader(program, vertex_shader);
             gl::AttachShader(program, fragment_shader);
             gl::LinkProgram(program);
+
+            // Check for linking errors
+            let mut success = 0;
+            gl::GetProgramiv(program, gl::LINK_STATUS, &mut success);
+            if success == 0 {
+                let mut len = 0;
+                gl::GetProgramiv(program, gl::INFO_LOG_LENGTH, &mut len);
+                let mut buffer = vec![0u8; len as usize];
+                gl::GetProgramInfoLog(
+                    program,
+                    len,
+                    std::ptr::null_mut(),
+                    buffer.as_mut_ptr() as *mut _
+                );
+                return Err(String::from_utf8_lossy(&buffer).into_owned());
+            }
+
+            println!("Program linked successfully.");
+
             gl::DeleteShader(vertex_shader);
             gl::DeleteShader(fragment_shader);
-            program
-        };
 
-        let projection_loc = unsafe {
-            let name = CString::new("projection").unwrap();
-            gl::GetUniformLocation(program, name.as_ptr())
-        };
+            // Create and set up VAO/VBO first
+            let mut vertex_array = 0;
+            let mut vertex_buffer = 0;
 
-        let color_loc = unsafe {
-            let name = CString::new("color").unwrap();
-            gl::GetUniformLocation(program, name.as_ptr())
-        };
-
-        let mut vertex_array = 0;
-        let mut vertex_buffer = 0;
-
-        unsafe {
             gl::GenVertexArrays(1, &mut vertex_array);
             gl::BindVertexArray(vertex_array);
 
             gl::GenBuffers(1, &mut vertex_buffer);
             gl::BindBuffer(gl::ARRAY_BUFFER, vertex_buffer);
 
-            gl::EnableVertexAttribArray(0);
+            // Set up vertex attributes ONCE during initialization
             gl::VertexAttribPointer(
-                0,
-                2,
+                0,  // location = 0 in shader
+                2,  // vec2
                 gl::FLOAT,
                 gl::FALSE,
                 0,
-                std::ptr::null(),
+                std::ptr::null()
             );
-        }
+            gl::EnableVertexAttribArray(0);
 
-        Ok(Renderer {
-            gl_context,
-            gl_surface,
-            vertex_buffer,
-            vertex_array,
-            program,
-            projection_loc,
-            color_loc,
-            point_size,
-            _window: window,
-        })
+            // Now get uniform locations
+            let name = CString::new("color").unwrap();
+            let color_loc = gl::GetUniformLocation(program, name.as_ptr());
+
+            // Use the program before setting uniforms
+            gl::UseProgram(program);
+
+            // Print debug info
+            println!("Initialized OpenGL objects:");
+            println!("  Program: {}", program);
+            println!("  VAO: {}", vertex_array);
+            println!("  VBO: {}", vertex_buffer);
+            println!("  Color loc: {}", color_loc);
+
+            if let Some(error) = get_gl_error() {
+                println!("OpenGL error during initialization: {}", error);
+            }
+            
+            Ok(Renderer {
+                gl_context,
+                gl_surface,
+                vertex_buffer,
+                vertex_array,
+                program,
+                color_loc,
+                point_size,
+                _window: window,
+            })
+        }
     }
 
     fn render(&self, bodies: &[Body], tree: &QuadTree) {
         unsafe {
             gl::Clear(gl::COLOR_BUFFER_BIT);
             gl::UseProgram(self.program);
+            
+            // Bind VAO once at the start
+            gl::BindVertexArray(self.vertex_array);
 
-            // Set up orthographic projection
+            // Draw the tree boxes with a scale transformation
+            gl::LineWidth(1.0);
+            gl::Uniform4f(self.color_loc, 0.5, 0.5, 0.5, 1.0);  // Bright green
+
+            // Get tree bounds for scaling
             let bounds = tree.get_bounds();
-            let scale = 1.0 / bounds.diagonal() as f32;
-            let projection = [
-                scale, 0.0, 0.0, 0.0,
-                0.0, scale, 0.0, 0.0,
-                0.0, 0.0, 1.0, 0.0,
-                0.0, 0.0, 0.0, 1.0f32,
-            ];
-            gl::UniformMatrix4fv(self.projection_loc, 1, gl::FALSE, projection.as_ptr());
+            let width = (bounds.max[0] - bounds.min[0]).abs() as f32;
+            let height = (bounds.max[1] - bounds.min[1]).abs() as f32;
+            let scale = 1.6f32 / width.max(height);  // Scale to fit in [-0.8, 0.8] range
+            let center_x = (bounds.min[0] + bounds.max[0]) as f32 * 0.5;
+            let center_y = (bounds.min[1] + bounds.max[1]) as f32 * 0.5;
 
-            // Draw quadtree
-            gl::Uniform4f(self.color_loc, 0.3, 0.3, 0.3, 0.5);
-            self.draw_tree(tree);
+            self.draw_tree_recursive(tree, scale, center_x, center_y);
 
             // Draw bodies
+            gl::PointSize(self.point_size);
             gl::Uniform4f(self.color_loc, 1.0, 1.0, 1.0, 1.0);
-            self.draw_bodies(bodies);
+            self.draw_bodies_scaled(bodies, scale, center_x, center_y);
+
+            if let Some(error) = get_gl_error() {
+                println!("OpenGL error: {}", error);
+            }
 
             self.gl_surface.swap_buffers(&self.gl_context).unwrap();
         }
     }
 
-    fn draw_tree(&self, tree: &QuadTree) {
+    fn draw_tree_recursive(&self, tree: &QuadTree, scale: f32, center_x: f32, center_y: f32) {
         let bounds = tree.get_bounds();
+        
+        // Transform coordinates to normalized device coordinates
+        let min_x = (bounds.min[0] as f32 - center_x) * scale;
+        let max_x = (bounds.max[0] as f32 - center_x) * scale;
+        let min_y = (bounds.min[1] as f32 - center_y) * scale;
+        let max_y = (bounds.max[1] as f32 - center_y) * scale;
+
         let vertices: Vec<f32> = vec![
-            bounds.min[0] as f32, bounds.min[1] as f32,
-            bounds.max[0] as f32, bounds.min[1] as f32,
-            bounds.max[0] as f32, bounds.max[1] as f32,
-            bounds.min[0] as f32, bounds.max[1] as f32,
-            bounds.min[0] as f32, bounds.min[1] as f32,
+            min_x, min_y,  // Bottom left
+            max_x, min_y,  // Bottom right
+            max_x, max_y,  // Top right
+            min_x, max_y,  // Top left
+            min_x, min_y,  // Back to start
         ];
 
         unsafe {
@@ -252,17 +266,20 @@ impl Renderer {
 
             gl::DrawArrays(gl::LINE_STRIP, 0, vertices.len() as i32 / 2);
 
-            // Recursively draw children
+            // Draw children
             for child in tree.get_children().iter().flatten() {
-                self.draw_tree(child);
+                self.draw_tree_recursive(child, scale, center_x, center_y);
             }
         }
     }
 
-    fn draw_bodies(&self, bodies: &[Body]) {
+    fn draw_bodies_scaled(&self, bodies: &[Body], scale: f32, center_x: f32, center_y: f32) {
         let vertices: Vec<f32> = bodies
             .iter()
-            .flat_map(|body| [body.position[0] as f32, body.position[1] as f32])
+            .flat_map(|body| [
+                (body.position[0] as f32 - center_x) * scale,
+                (body.position[1] as f32 - center_y) * scale
+            ])
             .collect();
 
         unsafe {
@@ -274,30 +291,67 @@ impl Renderer {
                 gl::STREAM_DRAW,
             );
 
-            gl::PointSize(self.point_size);
             gl::DrawArrays(gl::POINTS, 0, bodies.len() as i32);
         }
+    }
+}
+
+fn get_gl_error() -> Option<GLenum> {
+    unsafe {
+        let error = gl::GetError();
+        if error != gl::NO_ERROR {
+            Some(error)
+        } else {
+            None
+        }
+    }
+}
+
+fn compile_shader(shader_type: GLenum, source: &str) -> Result<GLuint, String> {
+    unsafe {
+        let shader = gl::CreateShader(shader_type);
+        let c_str = CString::new(source.as_bytes()).unwrap();
+        gl::ShaderSource(shader, 1, &c_str.as_ptr(), std::ptr::null());
+        gl::CompileShader(shader);
+
+        let mut success = 0;
+        gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut success);
+        if success == 0 {
+            let mut len = 0;
+            gl::GetShaderiv(shader, gl::INFO_LOG_LENGTH, &mut len);
+            let mut buffer = vec![0u8; len as usize];
+            gl::GetShaderInfoLog(
+                shader,
+                len,
+                std::ptr::null_mut(),
+                buffer.as_mut_ptr() as *mut _
+            );
+            return Err(String::from_utf8_lossy(&buffer).into_owned());
+        }
+        Ok(shader)
     }
 }
 
 impl Drop for Renderer {
     fn drop(&mut self) {
         unsafe {
-            gl::DeleteVertexArrays(1, &self.vertex_array);
             gl::DeleteBuffers(1, &self.vertex_buffer);
+            gl::DeleteVertexArrays(1, &self.vertex_array);
             gl::DeleteProgram(self.program);
         }
     }
 }
 
-pub fn init_window(event_loop: &EventLoop<()>, width: u32, height: u32, point_size: f32) -> Result<(), String> {
+pub fn init_window(event_loop: &EventLoop<()>, width: u32, height: u32, point_size: f32) -> Result<(), Box<dyn std::error::Error>> {
+    let renderer = Renderer::new(event_loop, (width, height), point_size)?;
     unsafe {
-        if RENDERER.is_some() {
-            return Err("Renderer already initialized".to_string());
-        }
-        RENDERER = Some(Renderer::new(event_loop, (width, height), point_size)?);
+        RENDERER = Some(renderer);
     }
     Ok(())
+}
+
+pub fn window_open() -> bool {
+    unsafe { RENDERER.is_some() }
 }
 
 pub fn draw(bodies: &[Body], tree: &QuadTree) {
@@ -306,14 +360,4 @@ pub fn draw(bodies: &[Body], tree: &QuadTree) {
             renderer.render(bodies, tree);
         }
     }
-}
-
-pub fn close_window() {
-    unsafe {
-        RENDERER = None;
-    }
-}
-
-pub fn window_open() -> bool {
-    unsafe { RENDERER.is_some() }
 }
