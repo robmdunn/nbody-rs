@@ -92,6 +92,10 @@ struct Config {
     /// Point size for rendering bodies
     #[arg(short = 'p', long, default_value_t = 2.0)]
     point_size: f32,
+
+    /// Use fixed scale view instead of following particles
+    #[arg(long)]
+    fixed_scale: bool,
 }
 
 fn random_bodies(config: &Config) -> Vec<Body> {
@@ -230,8 +234,14 @@ fn run_simulation(config: Config) -> Result<(), Box<dyn std::error::Error>> {
 
     if !config.no_graphics {
         let event_loop = EventLoop::new();
-        render::init_window(&event_loop, config.width, config.height, config.point_size)?;
-
+        render::init_window(
+            &event_loop,
+            config.width,
+            config.height,
+            config.point_size,
+            config.fixed_scale
+        )?;
+        
         event_loop.run(move |event, _, control_flow| {
             *control_flow = ControlFlow::Poll;
 

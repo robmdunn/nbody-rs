@@ -25,6 +25,7 @@ pub struct Renderer {
     program: u32,
     color_loc: i32,
     point_size: f32,
+    fixed_scale: bool,
     _window: Window,
 }
 
@@ -49,7 +50,7 @@ const FRAGMENT_SHADER: &str = r#"
 static mut RENDERER: Option<Renderer> = None;
 
 impl Renderer {
-    fn new(event_loop: &EventLoop<()>, window_size: (u32, u32), point_size: f32) -> Result<Self, String> {
+    fn new(event_loop: &EventLoop<()>, window_size: (u32, u32), point_size: f32, fixed_scale: bool) -> Result<Self, String> {
         let window_builder = WindowBuilder::new()
             .with_title("N-body Simulation")
             .with_inner_size(winit::dpi::LogicalSize::new(
@@ -198,61 +199,63 @@ impl Renderer {
                 program,
                 color_loc,
                 point_size,
+                fixed_scale,
                 _window: window,
             })
         }
     }
 
+
     fn render(&self, bodies: &[Body], tree: &QuadTree) {
         unsafe {
             gl::Clear(gl::COLOR_BUFFER_BIT);
             gl::UseProgram(self.program);
-            
-            // Bind VAO once at the start
             gl::BindVertexArray(self.vertex_array);
 
-            // Draw the tree boxes with a scale transformation
+            let scale = if self.fixed_scale {
+                0.8f32  // Fixed scale that maps [-1,1] to [-0.8,0.8]
+            } else {
+                // Dynamic scale based on current bounds
+                let bounds = tree.get_bounds();
+                let width = (bounds.max[0] - bounds.min[0]).abs() as f32;
+                let height = (bounds.max[1] - bounds.min[1]).abs() as f32;
+                1.6f32 / width.max(height)
+            };
+
+            // Center offset only needed for dynamic scaling
+            let (center_x, center_y) = if self.fixed_scale {
+                (0.0, 0.0)
+            } else {
+                let bounds = tree.get_bounds();
+                (
+                    (bounds.min[0] + bounds.max[0]) as f32 * 0.5,
+                    (bounds.min[1] + bounds.max[1]) as f32 * 0.5,
+                )
+            };
+
+            // Draw the tree boxes
             gl::LineWidth(1.0);
-            gl::Uniform4f(self.color_loc, 0.5, 0.5, 0.5, 1.0);  // Bright green
-
-            // Get tree bounds for scaling
-            let bounds = tree.get_bounds();
-            let width = (bounds.max[0] - bounds.min[0]).abs() as f32;
-            let height = (bounds.max[1] - bounds.min[1]).abs() as f32;
-            let scale = 1.6f32 / width.max(height);  // Scale to fit in [-0.8, 0.8] range
-            let center_x = (bounds.min[0] + bounds.max[0]) as f32 * 0.5;
-            let center_y = (bounds.min[1] + bounds.max[1]) as f32 * 0.5;
-
-            self.draw_tree_recursive(tree, scale, center_x, center_y);
+            gl::Uniform4f(self.color_loc, 0.3, 0.3, 0.3, 0.8);
+            self.draw_tree(tree, scale, center_x, center_y);
 
             // Draw bodies
             gl::PointSize(self.point_size);
             gl::Uniform4f(self.color_loc, 1.0, 1.0, 1.0, 1.0);
-            self.draw_bodies_scaled(bodies, scale, center_x, center_y);
-
-            if let Some(error) = get_gl_error() {
-                println!("OpenGL error: {}", error);
-            }
+            self.draw_bodies(bodies, scale, center_x, center_y);
 
             self.gl_surface.swap_buffers(&self.gl_context).unwrap();
         }
     }
 
-    fn draw_tree_recursive(&self, tree: &QuadTree, scale: f32, center_x: f32, center_y: f32) {
+    fn draw_tree(&self, tree: &QuadTree, scale: f32, center_x: f32, center_y: f32) {
         let bounds = tree.get_bounds();
         
-        // Transform coordinates to normalized device coordinates
-        let min_x = (bounds.min[0] as f32 - center_x) * scale;
-        let max_x = (bounds.max[0] as f32 - center_x) * scale;
-        let min_y = (bounds.min[1] as f32 - center_y) * scale;
-        let max_y = (bounds.max[1] as f32 - center_y) * scale;
-
         let vertices: Vec<f32> = vec![
-            min_x, min_y,  // Bottom left
-            max_x, min_y,  // Bottom right
-            max_x, max_y,  // Top right
-            min_x, max_y,  // Top left
-            min_x, min_y,  // Back to start
+            (bounds.min[0] as f32 - center_x) * scale, (bounds.min[1] as f32 - center_y) * scale,
+            (bounds.max[0] as f32 - center_x) * scale, (bounds.min[1] as f32 - center_y) * scale,
+            (bounds.max[0] as f32 - center_x) * scale, (bounds.max[1] as f32 - center_y) * scale,
+            (bounds.min[0] as f32 - center_x) * scale, (bounds.max[1] as f32 - center_y) * scale,
+            (bounds.min[0] as f32 - center_x) * scale, (bounds.min[1] as f32 - center_y) * scale,
         ];
 
         unsafe {
@@ -268,17 +271,17 @@ impl Renderer {
 
             // Draw children
             for child in tree.get_children().iter().flatten() {
-                self.draw_tree_recursive(child, scale, center_x, center_y);
+                self.draw_tree(child, scale, center_x, center_y);
             }
         }
     }
 
-    fn draw_bodies_scaled(&self, bodies: &[Body], scale: f32, center_x: f32, center_y: f32) {
+    fn draw_bodies(&self, bodies: &[Body], scale: f32, center_x: f32, center_y: f32) {
         let vertices: Vec<f32> = bodies
             .iter()
             .flat_map(|body| [
                 (body.position[0] as f32 - center_x) * scale,
-                (body.position[1] as f32 - center_y) * scale
+                (body.position[1] as f32 - center_y) * scale,
             ])
             .collect();
 
@@ -295,6 +298,7 @@ impl Renderer {
         }
     }
 }
+
 
 fn get_gl_error() -> Option<GLenum> {
     unsafe {
@@ -342,8 +346,14 @@ impl Drop for Renderer {
     }
 }
 
-pub fn init_window(event_loop: &EventLoop<()>, width: u32, height: u32, point_size: f32) -> Result<(), Box<dyn std::error::Error>> {
-    let renderer = Renderer::new(event_loop, (width, height), point_size)?;
+pub fn init_window(
+    event_loop: &EventLoop<()>, 
+    width: u32, 
+    height: u32, 
+    point_size: f32,
+    fixed_scale: bool
+) -> Result<(), Box<dyn std::error::Error>> {
+    let renderer = Renderer::new(event_loop, (width, height), point_size, fixed_scale)?;
     unsafe {
         RENDERER = Some(renderer);
     }
