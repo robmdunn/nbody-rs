@@ -1,0 +1,14 @@
+[package]
+name = "nbody-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+rayon = { workspace = true, optional = true }
+rand = { workspace = true }
+getrandom = { workspace = true }
+glow = { workspace = true }
+
+[features]
+default = ["parallel"]
+parallel = ["rayon"]

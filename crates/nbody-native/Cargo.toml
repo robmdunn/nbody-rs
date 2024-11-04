@@ -1,0 +1,22 @@
+[package]
+name = "nbody-native"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+nbody-core = { path = "../nbody-core" }
+clap = { workspace = true }
+console = { workspace = true }
+winit = { workspace = true }
+glutin = "0.30"
+glutin-winit = "0.3"
+raw-window-handle = { workspace = true }
+glow = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.8"
+
+[[bin]]
+name = "nbody"
+path = "src/main.rs"

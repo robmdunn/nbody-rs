@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write, BufRead};
 use std::path::Path;
-use crate::body::Body;
+use nbody_core::Body;
 
 /// Read simulation state from a file
 pub fn read_bodies<P: AsRef<Path>>(
