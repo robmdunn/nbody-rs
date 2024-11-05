@@ -7,41 +7,164 @@
         body {
             margin: 0;
             background-color: black;
+            color: white;
+            font-family: Arial, sans-serif;
+            min-height: 100vh;
+        }
+        .container {
+            display: flex;
+            padding: 20px;
+            gap: 20px;
+        }
+        .controls {
+            flex: 0 0 300px;
+            padding: 20px;
+            background: #222;
+            border-radius: 8px;
+        }
+        .simulation {
+            flex-grow: 1;
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100vh;
         }
         canvas {
             border: 1px solid #333;
         }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #aaa;
+        }
+        input {
+            width: 100%;
+            padding: 5px;
+            background: #333;
+            border: 1px solid #444;
+            color: white;
+            border-radius: 4px;
+        }
+        button {
+            width: 100%;
+            padding: 10px;
+            background: #0066cc;
+            border: none;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0052a3;
+        }
     </style>
 </head>
 <body>
-    <canvas id="canvas"></canvas>
+    <div class="container">
+        <div class="controls">
+            <h2>Simulation Controls</h2>
+            <form id="configForm">
+                <div class="form-group">
+                    <label for="n_bodies">Number of Bodies</label>
+                    <input type="number" id="n_bodies" value="1000">
+                </div>
+                <div class="form-group">
+                    <label for="mass">Mass</label>
+                    <input type="number" id="mass" value="2000.0">
+                </div>
+                <div class="form-group">
+                    <label for="g">Gravitational Constant</label>
+                    <input type="number" id="g" value="6.67384e-11">
+                </div>
+                <div class="form-group">
+                    <label for="timestep">Timestep</label>
+                    <input type="number" id="timestep" value="0.1" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label for="softening">Softening Factor</label>
+                    <input type="number" id="softening" value="0.005" step="0.001">
+                </div>
+                <div class="form-group">
+                    <label for="spin">Initial Spin</label>
+                    <input type="number" id="spin" value="0.05" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label for="mzero">Central Mass</label>
+                    <input type="number" id="mzero" value="1e7">
+                </div>
+                <div class="form-group">
+                    <label for="tree_ratio">Tree Ratio</label>
+                    <input type="number" id="tree_ratio" value="3.0" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label for="point_size">Point Size</label>
+                    <input type="number" id="point_size" value="2.0" step="0.5">
+                </div>
+                <div class="form-group">
+                    <label for="fixed_scale">Fixed Scale</label>
+                    <input type="checkbox" id="fixed_scale">
+                </div>
+                <button type="submit">Restart Simulation</button>
+            </form>
+        </div>
+        <div class="simulation">
+            <canvas id="canvas"></canvas>
+        </div>
+    </div>
+
     <script type="module">
-        import init, { NBodySimulation } from './pkg/nbody_wasm.js';
+        import init, { NBodySimulation, SimConfig } from './pkg/nbody_wasm.js';
+
+        let simulation = null;
+        let animationId = null;
+
+        function getConfig() {
+            const config = new SimConfig();
+            config.n_bodies = parseInt(document.getElementById('n_bodies').value);
+            config.mass = parseFloat(document.getElementById('mass').value);
+            config.g = parseFloat(document.getElementById('g').value);
+            config.timestep = parseFloat(document.getElementById('timestep').value);
+            config.softening = parseFloat(document.getElementById('softening').value);
+            config.spin = parseFloat(document.getElementById('spin').value);
+            config.mzero = parseFloat(document.getElementById('mzero').value);
+            config.tree_ratio = parseFloat(document.getElementById('tree_ratio').value);
+            config.point_size = parseFloat(document.getElementById('point_size').value);
+            config.fixed_scale = document.getElementById('fixed_scale').checked;
+            return config;
+        }
+
+        async function startSimulation() {
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+            }
+
+            const canvas = document.getElementById('canvas');
+            canvas.width = 800;
+            canvas.height = 800;
+
+            const config = getConfig();
+            simulation = new NBodySimulation(canvas, config);
+
+            function frame() {
+                simulation.step();
+                simulation.render();
+                animationId = requestAnimationFrame(frame);
+            }
+
+            animationId = requestAnimationFrame(frame);
+        }
 
         async function run() {
             await init();
 
-            const canvas = document.getElementById('canvas');
-            
-            // Set canvas size
-            canvas.width = 800;
-            canvas.height = 800;
+            document.getElementById('configForm').addEventListener('submit', (e) => {
+                e.preventDefault();
+                startSimulation();
+            });
 
-            // Create simulation
-            const simulation = new NBodySimulation(canvas, 1000, 2.0, false);
-
-            // Animation loop
-            function frame() {
-                simulation.step();
-                simulation.render();
-                requestAnimationFrame(frame);
-            }
-
-            requestAnimationFrame(frame);
+            startSimulation();
         }
 
         run().catch(console.error);
