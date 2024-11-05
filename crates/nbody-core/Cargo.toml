@@ -4,10 +4,10 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-rayon = { workspace = true, optional = true }
-rand = { workspace = true }
-getrandom = { workspace = true }
 glow = { workspace = true }
+rand = { workspace = true }
+rayon = { workspace = true, optional = true }
+getrandom = { workspace = true }
 
 [features]
 default = ["parallel"]

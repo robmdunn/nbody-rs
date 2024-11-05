@@ -1,13 +1,15 @@
 use wasm_bindgen::prelude::*;
-use web_sys::{WebGlRenderingContext, HtmlCanvasElement};
+use web_sys::{WebGl2RenderingContext, HtmlCanvasElement};
 use nbody_core::{Simulation, Body, Renderer};
 use std::sync::Arc;
+use std::f64::consts::PI;
+use rand::Rng;
+use glow::Context as GlowContext;
 
 #[wasm_bindgen]
 pub struct NBodySimulation {
     simulation: Simulation,
     renderer: Renderer,
-    gl_context: WebGlRenderingContext,
 }
 
 #[wasm_bindgen]
@@ -19,15 +21,21 @@ impl NBodySimulation {
         point_size: f32,
         fixed_scale: bool
     ) -> Result<NBodySimulation, JsValue> {
-        // Set up WebGL context
+        // Set up panic hook for better error messages
+        console_error_panic_hook::set_once();
+
+        // Get WebGL2 context
         let gl_context = canvas
             .get_context("webgl2")?
-            .unwrap()
-            .dyn_into::<WebGlRenderingContext>()?;
+            .ok_or_else(|| JsValue::from_str("Failed to get WebGL2 context"))?
+            .dyn_into::<WebGl2RenderingContext>()?;
 
         // Create glow context
-        let gl = Arc::new(glow::Context::from_webgl2_context(gl_context.clone()));
-        
+        let gl = unsafe {
+            let gl = GlowContext::from_webgl2_context(gl_context);
+            Arc::new(gl)
+        };
+
         // Initialize renderer
         let renderer = Renderer::new(gl, point_size, fixed_scale)
             .map_err(|e| JsValue::from_str(&e))?;
@@ -44,7 +52,6 @@ impl NBodySimulation {
         Ok(NBodySimulation {
             simulation,
             renderer,
-            gl_context,
         })
     }
 
@@ -60,14 +67,38 @@ impl NBodySimulation {
 }
 
 fn create_random_bodies(n_bodies: usize) -> Vec<Body> {
-    // Implementation similar to the original random_bodies function
-    // but adapted for WASM context...
+    let mut rng = rand::thread_rng();
+    let mut bodies = Vec::with_capacity(n_bodies);
+
+    // Create central body
+    bodies.push(Body::new(
+        1.0e7, // mass
+        0.0, 0.0,  // position
+        0.0, 0.0   // velocity
+    ));
+
+    // Create remaining bodies
+    for _ in 1..n_bodies {
+        let r = rng.gen::<f64>() * 2.0 - 1.0;
+        let theta = 2.0 * PI * rng.gen::<f64>();
+
+        let x = r * theta.cos();
+        let y = r * theta.sin();
+
+        // Add some initial velocity for orbit
+        let spin_factor = 0.05 * (1.0 + 0.1 * rng.gen::<f64>()) / (1.0 + r.abs());
+        let vx = -y * spin_factor;
+        let vy = x * spin_factor;
+
+        bodies.push(Body::new(2000.0, x, y, vx, vy));
+    }
+
+    bodies
 }
 
 // Required by wasm-bindgen
 #[wasm_bindgen(start)]
 pub fn main_js() -> Result<(), JsValue> {
-    #[cfg(debug_assertions)]
     console_error_panic_hook::set_once();
     Ok(())
 }

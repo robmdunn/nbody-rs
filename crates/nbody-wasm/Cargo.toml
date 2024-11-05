@@ -8,12 +8,24 @@ crate-type = ["cdylib"]
 
 [dependencies]
 nbody-core = { path = "../nbody-core", default-features = false }
-wasm-bindgen = { workspace = true }
-web-sys = { workspace = true }
-js-sys = { workspace = true }
 glow = { workspace = true }
-console_error_panic_hook = "0.1"  # Add this for better error handling
-getrandom = { version = "0.2", features = ["js"] }  # Required for rand in WASM
+console_error_panic_hook = "0.1"
+getrandom = { workspace = true, features = ["js"] }
+rand = { workspace = true }
+wasm-bindgen = { workspace = true }
+web-sys = { workspace = true, features = [
+    "HtmlCanvasElement",
+    "WebGl2RenderingContext",
+    "WebGlProgram",
+    "WebGlShader",
+    "WebGlBuffer",
+    "WebGlUniformLocation",
+    "Document",
+    "Window",
+    "Element",
+    "console",
+]}
+js-sys = { workspace = true }
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = ["-O4"]

@@ -34,7 +34,7 @@ const DEFAULT_SPIN: f64 = 0.05;
 const DEFAULT_MZERO: f64 = 1.0e7;
 const DEFAULT_TREE_RATIO: f64 = 3.0;
 const DEFAULT_WRITE_INTERVAL: usize = 100;
-const FRAME_TIME: Duration = Duration::from_micros(33333); // Approximately 30 FPS
+const FRAME_TIME: Duration = Duration::from_micros(66666); // Approximately 30 FPS
 const PI: f64 = std::f32::consts::PI as f64;
 
 #[derive(Parser, Debug)]

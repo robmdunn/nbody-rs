@@ -1,13 +1,12 @@
-// crates/nbody-core/src/render.rs
 use glow::*;
 use std::sync::Arc;
 use crate::{Body, QuadTree};
 
 pub struct Renderer {
     gl: Arc<Context>,
-    program: NativeProgram,
-    vertex_buffer: NativeBuffer,
-    vertex_array: NativeVertexArray,
+    program: Program,
+    vertex_buffer: Buffer,
+    vertex_array: VertexArray,
     color_location: UniformLocation,
     point_size_location: UniformLocation,
     point_size: f32,
@@ -21,12 +20,12 @@ impl Renderer {
         fixed_scale: bool,
     ) -> Result<Self, String> {
         unsafe {
-            let vertex_shader_source = r#"#version 410
+            let vertex_shader_source = r#"#version 300 es
                 layout (location = 0) in vec2 position;
                 uniform float pointSize;
                 uniform vec4 color;
                 out vec4 vColor;
-                
+
                 void main() {
                     gl_Position = vec4(position.xy, 0.0, 1.0);
                     gl_PointSize = pointSize;
@@ -34,29 +33,29 @@ impl Renderer {
                 }
             "#;
 
-            let fragment_shader_source = r#"#version 410
+            let fragment_shader_source = r#"#version 300 es
+                precision mediump float;
                 in vec4 vColor;
                 out vec4 fragColor;
-                
+
                 void main() {
                     fragColor = vColor;
                 }
             "#;
 
-            println!("OpenGL Version: {}", gl.get_parameter_string(VERSION));
-            println!("GLSL Version: {}", gl.get_parameter_string(SHADING_LANGUAGE_VERSION));
+            println!("Creating program...");
 
             let program = create_program(&gl, vertex_shader_source, fragment_shader_source)?;
-            
+
             let vertex_array = gl.create_vertex_array()
                 .map_err(|e| format!("Failed to create vertex array: {}", e))?;
-            
+
             let vertex_buffer = gl.create_buffer()
                 .map_err(|e| format!("Failed to create vertex buffer: {}", e))?;
-            
+
             gl.bind_vertex_array(Some(vertex_array));
             gl.bind_buffer(ARRAY_BUFFER, Some(vertex_buffer));
-            
+
             gl.enable_vertex_attrib_array(0);
             gl.vertex_attrib_pointer_f32(
                 0,          // location
@@ -79,7 +78,7 @@ impl Renderer {
             gl.enable(BLEND);
             gl.enable(PROGRAM_POINT_SIZE);
             gl.blend_func(SRC_ALPHA, ONE_MINUS_SRC_ALPHA);
-            
+
             Ok(Renderer {
                 gl,
                 program,
@@ -189,7 +188,7 @@ fn create_program(
     gl: &Context,
     vert_source: &str,
     frag_source: &str,
-) -> Result<NativeProgram, String> {
+) -> Result<Program, String> {
     unsafe {
         let program = gl.create_program()
             .map_err(|e| format!("Failed to create program: {}", e))?;
@@ -204,7 +203,7 @@ fn create_program(
         for (shader_type, shader_source) in shader_sources.iter() {
             let shader = gl.create_shader(*shader_type)
                 .map_err(|e| format!("Failed to create shader: {}", e))?;
-            
+
             gl.shader_source(shader, shader_source);
             gl.compile_shader(shader);
 
@@ -218,7 +217,7 @@ fn create_program(
         }
 
         gl.link_program(program);
-        
+
         for shader in shaders {
             gl.delete_shader(shader);
         }
