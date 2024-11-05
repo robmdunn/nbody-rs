@@ -20,7 +20,11 @@ impl Renderer {
         fixed_scale: bool,
     ) -> Result<Self, String> {
         unsafe {
-            let vertex_shader_source = r#"#version 300 es
+            // Define shaders based on target platform
+            #[cfg(target_arch = "wasm32")]
+            let (vertex_shader_source, fragment_shader_source) = (
+                // WebGL (GLSL ES 300)
+                r#"#version 300 es
                 layout (location = 0) in vec2 position;
                 uniform float pointSize;
                 uniform vec4 color;
@@ -31,9 +35,8 @@ impl Renderer {
                     gl_PointSize = pointSize;
                     vColor = color;
                 }
-            "#;
-
-            let fragment_shader_source = r#"#version 300 es
+                "#,
+                r#"#version 300 es
                 precision mediump float;
                 in vec4 vColor;
                 out vec4 fragColor;
@@ -41,7 +44,33 @@ impl Renderer {
                 void main() {
                     fragColor = vColor;
                 }
-            "#;
+                "#
+            );
+
+            #[cfg(not(target_arch = "wasm32"))]
+            let (vertex_shader_source, fragment_shader_source) = (
+                // Desktop OpenGL (GLSL 410)
+                r#"#version 410
+                layout (location = 0) in vec2 position;
+                uniform float pointSize;
+                uniform vec4 color;
+                out vec4 vColor;
+
+                void main() {
+                    gl_Position = vec4(position.xy, 0.0, 1.0);
+                    gl_PointSize = pointSize;
+                    vColor = color;
+                }
+                "#,
+                r#"#version 410
+                in vec4 vColor;
+                out vec4 fragColor;
+
+                void main() {
+                    fragColor = vColor;
+                }
+                "#
+            );
 
             println!("Creating program...");
 
