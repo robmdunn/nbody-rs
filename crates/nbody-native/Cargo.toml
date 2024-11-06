@@ -1,0 +1,24 @@
+[package]
+name = "nbody-native"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+nbody-core = { path = "../nbody-core", features = ["parallel"] }
+glow = { workspace = true }
+rand = { workspace = true }
+clap = { workspace = true }
+console = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+winit = { workspace = true }
+glutin = "0.30"
+glutin-winit = "0.3"
+raw-window-handle = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.8"
+
+[[bin]]
+name = "nbody"
+path = "src/main.rs"

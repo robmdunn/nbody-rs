@@ -1,3 +1,4 @@
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use crate::body::Body;
 use crate::tree::{QuadTree, Bounds};
@@ -77,39 +78,92 @@ impl Simulation {
     fn calculate_accelerations(&mut self) {
         // Build the quad tree
         let tree = self.build_tree();
+        let g = self.g;
+        let softening = self.softening;
+        let threshold = self.tree_threshold;
 
-        // Calculate forces/accelerations in parallel
-        self.bodies.par_iter_mut().for_each(|body| {
-            // Reset acceleration to zero before calculating new forces
-            body.acceleration = [0.0, 0.0];
-            
-            let force = tree.calculate_force(
-                body,
-                self.g,
-                self.softening,
-                self.tree_threshold
-            );
+        // Calculate forces/accelerations using parallel or sequential iteration
+        #[cfg(feature = "parallel")]
+        {
+            self.bodies.par_iter_mut().for_each(|body| {
+                // Reset acceleration
+                body.acceleration = [0.0, 0.0];
+                
+                // Calculate force
+                let force = tree.calculate_force(
+                    body,
+                    g,
+                    softening,
+                    threshold
+                );
 
-            // F = ma -> a = F/m
-            body.acceleration = [
-                force[0] / body.mass,
-                force[1] / body.mass
-            ];
-        });
+                // Update acceleration (F = ma -> a = F/m)
+                body.acceleration = [
+                    force[0] / body.mass,
+                    force[1] / body.mass
+                ];
+            });
+        }
+
+        #[cfg(not(feature = "parallel"))]
+        {
+            self.bodies.iter_mut().for_each(|body| {
+                // Reset acceleration
+                body.acceleration = [0.0, 0.0];
+                
+                // Calculate force
+                let force = tree.calculate_force(
+                    body,
+                    g,
+                    softening,
+                    threshold
+                );
+
+                // Update acceleration (F = ma -> a = F/m)
+                body.acceleration = [
+                    force[0] / body.mass,
+                    force[1] / body.mass
+                ];
+            });
+        }
     }
 
     /// Update velocities based on current accelerations
     fn update_velocities(&mut self) {
-        self.bodies.par_iter_mut().for_each(|body| {
-            body.update_velocity(self.timestep);
-        });
+        let dt = self.timestep;
+        
+        #[cfg(feature = "parallel")]
+        {
+            self.bodies.par_iter_mut().for_each(|body| {
+                body.update_velocity(dt);
+            });
+        }
+
+        #[cfg(not(feature = "parallel"))]
+        {
+            self.bodies.iter_mut().for_each(|body| {
+                body.update_velocity(dt);
+            });
+        }
     }
 
     /// Update positions based on current velocities
     fn update_positions(&mut self) {
-        self.bodies.par_iter_mut().for_each(|body| {
-            body.update_position(self.timestep);
-        });
+        let dt = self.timestep;
+        
+        #[cfg(feature = "parallel")]
+        {
+            self.bodies.par_iter_mut().for_each(|body| {
+                body.update_position(dt);
+            });
+        }
+
+        #[cfg(not(feature = "parallel"))]
+        {
+            self.bodies.iter_mut().for_each(|body| {
+                body.update_position(dt);
+            });
+        }
     }
 
     /// Perform one simulation step
@@ -150,19 +204,19 @@ mod tests {
             Body::new(1.0, 1.0, 1.0, 1.0, 1.0),      // Moving right and up
         ];
         let mut sim = Simulation::new(bodies, 0.1, 0.0, 0.001, 0.5);  // Set g=0 to prevent attraction
-        
+
         // Get initial bounds
         let initial_bounds = sim.get_tree().get_bounds().clone();
-        
+
         // Step simulation several times
         for _ in 0..10 {
             sim.step();
         }
-        
+
         // Get new bounds
         let binding = sim.get_tree();
         let new_bounds = binding.get_bounds();
-        
+
         // Verify bounds have grown
         assert!(new_bounds.min[0] < initial_bounds.min[0]);
         assert!(new_bounds.min[1] < initial_bounds.min[1]);
