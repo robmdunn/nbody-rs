@@ -2,7 +2,7 @@
 
 A gravitational N-body simulation implemented in Rust, supporting native and WebAssembly targets. The simulation uses the Barnes-Hut algorithm for force calculations and real-time visualization using OpenGL/WebGL.
 
-![N-Body Simulation](https://raw.githubusercontent.com/robmdunn/nbody-rs/main/docs/screenshot.png)
+![N-Body Simulation](https://raw.githubusercontent.com/robmdunn/nbody-rs/main/nbody.png)
 
 ## Features
 
