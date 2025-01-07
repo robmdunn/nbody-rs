@@ -34,7 +34,7 @@ cd nbody-rs
 
 2. Build and run in release mode:
 ```bash
-cargo run --release
+cargo run -p nbody-native --release
 ```
 
 The native version supports various command-line arguments:
@@ -45,20 +45,20 @@ nbody --help
 
 Example with custom parameters:
 ```bash
-cargo run --release -- -n 10000 --mass 2000 --spin 0.05
+cargo run -p nbody-native --release -- -n 10000 --mass 2000 --spin 0.05
 ```
 
 ### WebAssembly Build
 
 1. Build the WASM package:
 ```bash
-wasm-pack build crates/nbody-wasm --target web
+wasm-pack build crates/nbody-wasm --target web --out-dir ../../www/pkg
 ```
 
 2. Serve the web directory:
 ```bash
 # Using Python's built-in server
-python3 -m http.server 8080 --directory www/
+python3 -m http.server 8080 --directory www/ 
 ```
 
 3. Open your browser and navigate to `http://localhost:8080`
