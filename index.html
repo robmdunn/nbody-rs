@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>N-Body Simulation</title>
+    <style>
+        :root {
+            --primary-color: #0066cc;
+            --primary-hover: #0052a3;
+            --bg-dark: #222;
+            --bg-darker: #1a1a1a;
+            --border-color: #444;
+            --text-light: #aaa;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            margin: 0;
+            background-color: var(--bg-darker);
+            color: white;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            min-height: 100vh;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            padding: 1rem;
+            gap: 1rem;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .controls {
+            background: var(--bg-dark);
+            border-radius: 8px;
+            padding: 1.5rem;
+        }
+
+        .controls h2 {
+            margin-bottom: 1.5rem;
+            font-size: 1.5rem;
+            color: white;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+        }
+
+        .simulation {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            min-height: 300px;
+        }
+
+        canvas {
+            border: 1px solid var(--border-color);
+            max-width: 100%;
+            height: auto;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: var(--text-light);
+            font-size: 0.9rem;
+        }
+
+        input[type="number"],
+        input[type="text"] {
+            width: 100%;
+            padding: 0.5rem;
+            background: #333;
+            border: 1px solid var(--border-color);
+            color: white;
+            border-radius: 4px;
+            font-size: 1rem;
+        }
+
+        input[type="checkbox"] {
+            width: auto;
+            margin-right: 0.5rem;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+        }
+
+        .checkbox-group label {
+            margin-bottom: 0;
+        }
+
+        button {
+            width: 100%;
+            padding: 0.75rem;
+            background: var(--primary-color);
+            border: none;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: background-color 0.2s;
+        }
+
+        button:hover {
+            background: var(--primary-hover);
+        }
+
+        /* Responsive Design */
+        @media (min-width: 768px) {
+            .container {
+                flex-direction: row;
+                padding: 2rem;
+            }
+
+            .controls {
+                flex: 0 0 300px;
+                max-height: calc(100vh - 4rem);
+                overflow-y: auto;
+            }
+
+            .simulation {
+                flex: 1;
+                min-height: calc(100vh - 4rem);
+            }
+        }
+
+        @media (max-width: 767px) {
+            canvas {
+                width: 100% !important;
+                height: auto !important;
+            }
+
+            .controls {
+                order: 2;
+            }
+
+            .simulation {
+                order: 1;
+            }
+        }
+
+        /* Custom scrollbar for controls panel */
+        .controls::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .controls::-webkit-scrollbar-track {
+            background: var(--bg-dark);
+        }
+
+        .controls::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 4px;
+        }
+
+        .controls::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="controls">
+            <h2>Simulation Controls</h2>
+            <form id="configForm">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="n_bodies">Number of Bodies</label>
+                        <input type="number" id="n_bodies" value="16000">
+                    </div>
+                    <div class="form-group">
+                        <label for="mass">Mass</label>
+                        <input type="number" id="mass" value="400.0">
+                    </div>
+                    <div class="form-group">
+                        <label for="g">Gravitational Constant</label>
+                        <input type="number" id="g" value="6.67384e-11">
+                    </div>
+                    <div class="form-group">
+                        <label for="timestep">Timestep</label>
+                        <input type="number" id="timestep" value="0.1" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="softening">Softening Factor</label>
+                        <input type="number" id="softening" value="0.005" step="0.001">
+                    </div>
+                    <div class="form-group">
+                        <label for="spin">Initial Spin</label>
+                        <input type="number" id="spin" value="0.05" step="0.01">
+                    </div>
+                    <div class="form-group">
+                        <label for="mzero">Central Mass</label>
+                        <input type="number" id="mzero" value="400">
+                    </div>
+                    <div class="form-group">
+                        <label for="tree_ratio">Tree Ratio</label>
+                        <input type="number" id="tree_ratio" value="3.0" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="point_size">Point Size</label>
+                        <input type="number" id="point_size" value="2.0" step="0.5">
+                    </div>
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="fixed_scale">
+                            <label for="fixed_scale">Fixed Scale</label>
+                        </div>
+                    </div>
+                </div>
+                <button type="submit">Restart Simulation</button>
+            </form>
+        </div>
+        <div class="simulation">
+            <canvas id="canvas"></canvas>
+        </div>
+    </div>
+
+    <script type="module">
+        import init, { NBodySimulation, SimConfig } from './pkg/nbody_wasm.js';
+
+        let simulation = null;
+        let animationId = null;
+
+        function getConfig() {
+            const config = new SimConfig();
+            config.n_bodies = parseInt(document.getElementById('n_bodies').value);
+            config.mass = parseFloat(document.getElementById('mass').value);
+            config.g = parseFloat(document.getElementById('g').value);
+            config.timestep = parseFloat(document.getElementById('timestep').value);
+            config.softening = parseFloat(document.getElementById('softening').value);
+            config.spin = parseFloat(document.getElementById('spin').value);
+            config.mzero = parseFloat(document.getElementById('mzero').value);
+            config.tree_ratio = parseFloat(document.getElementById('tree_ratio').value);
+            config.point_size = parseFloat(document.getElementById('point_size').value);
+            config.fixed_scale = document.getElementById('fixed_scale').checked;
+            return config;
+        }
+
+        function resizeCanvas() {
+            const canvas = document.getElementById('canvas');
+            const container = document.querySelector('.simulation');
+            const size = Math.min(container.clientWidth, container.clientHeight);
+            canvas.width = size;
+            canvas.height = size;
+        }
+
+        async function startSimulation() {
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+            }
+
+            const canvas = document.getElementById('canvas');
+            resizeCanvas();
+
+            const config = getConfig();
+            simulation = new NBodySimulation(canvas, config);
+
+            function frame() {
+                simulation.step();
+                simulation.render();
+                animationId = requestAnimationFrame(frame);
+            }
+
+            animationId = requestAnimationFrame(frame);
+        }
+
+        async function run() {
+            await init();
+
+            window.addEventListener('resize', () => {
+                resizeCanvas();
+                if (simulation) {
+                    simulation.render();
+                }
+            });
+
+            document.getElementById('configForm').addEventListener('submit', (e) => {
+                e.preventDefault();
+                startSimulation();
+            });
+
+            startSimulation();
+        }
+
+        run().catch(console.error);
+    </script>
+</body>
+</html>

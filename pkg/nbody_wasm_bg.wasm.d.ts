@@ -1,0 +1,36 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export function __wbg_simconfig_free(a: number, b: number): void;
+export function __wbg_get_simconfig_n_bodies(a: number): number;
+export function __wbg_set_simconfig_n_bodies(a: number, b: number): void;
+export function __wbg_get_simconfig_mass(a: number): number;
+export function __wbg_set_simconfig_mass(a: number, b: number): void;
+export function __wbg_get_simconfig_g(a: number): number;
+export function __wbg_set_simconfig_g(a: number, b: number): void;
+export function __wbg_get_simconfig_timestep(a: number): number;
+export function __wbg_set_simconfig_timestep(a: number, b: number): void;
+export function __wbg_get_simconfig_softening(a: number): number;
+export function __wbg_set_simconfig_softening(a: number, b: number): void;
+export function __wbg_get_simconfig_spin(a: number): number;
+export function __wbg_set_simconfig_spin(a: number, b: number): void;
+export function __wbg_get_simconfig_mzero(a: number): number;
+export function __wbg_set_simconfig_mzero(a: number, b: number): void;
+export function __wbg_get_simconfig_tree_ratio(a: number): number;
+export function __wbg_set_simconfig_tree_ratio(a: number, b: number): void;
+export function __wbg_get_simconfig_point_size(a: number): number;
+export function __wbg_set_simconfig_point_size(a: number, b: number): void;
+export function __wbg_get_simconfig_fixed_scale(a: number): number;
+export function __wbg_set_simconfig_fixed_scale(a: number, b: number): void;
+export function simconfig_new(): number;
+export function __wbg_nbodysimulation_free(a: number, b: number): void;
+export function nbodysimulation_new(a: number, b: number, c: number): void;
+export function nbodysimulation_step(a: number): void;
+export function nbodysimulation_render(a: number): void;
+export function main_js(): void;
+export function __wbindgen_malloc(a: number, b: number): number;
+export function __wbindgen_realloc(a: number, b: number, c: number, d: number): number;
+export function __wbindgen_add_to_stack_pointer(a: number): number;
+export function __wbindgen_free(a: number, b: number, c: number): void;
+export function __wbindgen_exn_store(a: number): void;
+export function __wbindgen_start(): void;
