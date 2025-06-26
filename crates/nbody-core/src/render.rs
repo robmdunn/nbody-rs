@@ -477,32 +477,35 @@ impl Renderer3D {
             self.gl.use_program(Some(self.program));
             self.gl.bind_vertex_array(Some(self.vertex_array));
 
-            // Go back to simple projection that works
-            let scale = 0.1;
+            // Scale based on camera distance for zoom control - closer camera = larger scale (zoom in)
+            let camera_distance = (self.camera.position[0].powi(2) + self.camera.position[1].powi(2) + self.camera.position[2].powi(2)).sqrt();
+            let scale = 0.1 * (10.0 / camera_distance.max(1.0));
+            // Use a much smaller Z scale to prevent depth clipping issues
+            let z_scale = scale * 0.01; // Very small Z scale to keep points in visible range
             let mvp = [
                 scale, 0.0, 0.0, 0.0,
                 0.0, scale, 0.0, 0.0,
-                0.0, 0.0, scale, 0.0,
+                0.0, 0.0, z_scale, 0.0,
                 0.0, 0.0, 0.0, 1.0,
             ];
             
             // TODO: Apply camera rotation manually to vertex positions instead
 
             // Debug camera info and MVP matrix (only print occasionally to avoid spam)
-            static mut DEBUG_COUNTER: u32 = 0;
-            unsafe {
-                DEBUG_COUNTER += 1;
-                if DEBUG_COUNTER % 120 == 1 { // Print every ~2 seconds at 60fps
-                    println!("3D Camera: pos=[{:.1}, {:.1}, {:.1}], target=[{:.1}, {:.1}, {:.1}]",
-                        self.camera.position[0], self.camera.position[1], self.camera.position[2],
-                        self.camera.target[0], self.camera.target[1], self.camera.target[2]
-                    );
-                    println!("3D MVP Matrix: [{:.3}, {:.3}, {:.3}, {:.3}]", mvp[0], mvp[1], mvp[2], mvp[3]);
-                    println!("               [{:.3}, {:.3}, {:.3}, {:.3}]", mvp[4], mvp[5], mvp[6], mvp[7]);
-                    println!("               [{:.3}, {:.3}, {:.3}, {:.3}]", mvp[8], mvp[9], mvp[10], mvp[11]);
-                    println!("               [{:.3}, {:.3}, {:.3}, {:.3}]", mvp[12], mvp[13], mvp[14], mvp[15]);
-                }
-            }
+            // static mut DEBUG_COUNTER: u32 = 0;
+            // unsafe {
+            //     DEBUG_COUNTER += 1;
+            //     if DEBUG_COUNTER % 120 == 1 { // Print every ~2 seconds at 60fps
+            //         println!("3D Camera: pos=[{:.1}, {:.1}, {:.1}], target=[{:.1}, {:.1}, {:.1}]",
+            //             self.camera.position[0], self.camera.position[1], self.camera.position[2],
+            //             self.camera.target[0], self.camera.target[1], self.camera.target[2]
+            //         );
+            //         println!("3D MVP Matrix: [{:.3}, {:.3}, {:.3}, {:.3}]", mvp[0], mvp[1], mvp[2], mvp[3]);
+            //         println!("               [{:.3}, {:.3}, {:.3}, {:.3}]", mvp[4], mvp[5], mvp[6], mvp[7]);
+            //         println!("               [{:.3}, {:.3}, {:.3}, {:.3}]", mvp[8], mvp[9], mvp[10], mvp[11]);
+            //         println!("               [{:.3}, {:.3}, {:.3}, {:.3}]", mvp[12], mvp[13], mvp[14], mvp[15]);
+            //     }
+            // }
 
             // Upload MVP matrix
             self.gl.uniform_matrix_4_f32_slice(Some(&self.mvp_location), false, &mvp);
@@ -653,25 +656,25 @@ impl Renderer3D {
             .collect();
 
         // Debug output for first few bodies (only occasionally to avoid spam)
-        static mut RENDER_DEBUG_COUNTER: u32 = 0;
-        unsafe {
-            RENDER_DEBUG_COUNTER += 1;
-            if RENDER_DEBUG_COUNTER % 60 == 1 && bodies.len() > 0 { // Print every second at 60fps
-                println!("3D Render: {} bodies, first body at [{:.2}, {:.2}, {:.2}]", 
-                    bodies.len(), 
-                    bodies[0].position[0], 
-                    bodies[0].position[1], 
-                    bodies[0].position[2]
-                );
-                if bodies.len() > 1 {
-                    println!("  Second body at [{:.2}, {:.2}, {:.2}]", 
-                        bodies[1].position[0], 
-                        bodies[1].position[1], 
-                        bodies[1].position[2]
-                    );
-                }
-            }
-        }
+        // static mut RENDER_DEBUG_COUNTER: u32 = 0;
+        // unsafe {
+        //     RENDER_DEBUG_COUNTER += 1;
+        //     if RENDER_DEBUG_COUNTER % 60 == 1 && bodies.len() > 0 { // Print every second at 60fps
+        //         println!("3D Render: {} bodies, first body at [{:.2}, {:.2}, {:.2}]", 
+        //             bodies.len(), 
+        //             bodies[0].position[0], 
+        //             bodies[0].position[1], 
+        //             bodies[0].position[2]
+        //         );
+        //         if bodies.len() > 1 {
+        //             println!("  Second body at [{:.2}, {:.2}, {:.2}]", 
+        //                 bodies[1].position[0], 
+        //                 bodies[1].position[1], 
+        //                 bodies[1].position[2]
+        //             );
+        //         }
+        //     }
+        // }
 
         unsafe {
             self.gl.bind_buffer(ARRAY_BUFFER, Some(self.vertex_buffer));

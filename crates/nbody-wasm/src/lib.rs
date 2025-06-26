@@ -37,7 +37,7 @@ impl SimConfig {
             point_size: 2.0,
             fixed_scale: false,
             mode_3d: false,
-            show_wireframe: true,
+            show_wireframe: false,
         }
     }
 }
@@ -154,8 +154,8 @@ impl NBodySimulation {
             let distance = (current_pos[0] * current_pos[0] + current_pos[1] * current_pos[1] + current_pos[2] * current_pos[2]).sqrt();
             
             // Simple rotation around Y and X axes
-            let theta = dx * sensitivity;
-            let phi = -dy * sensitivity; // Reverse Y for different feel
+            let theta = -dx * sensitivity;
+            let phi = dy * sensitivity; 
             
             // Apply rotation (simplified)
             let cos_theta = theta.cos();
@@ -183,7 +183,7 @@ impl NBodySimulation {
             let zoom_speed = 0.1;
             let current_pos = camera.position;
             let distance = (current_pos[0] * current_pos[0] + current_pos[1] * current_pos[1] + current_pos[2] * current_pos[2]).sqrt();
-            let new_distance = (distance + delta_y * zoom_speed).clamp(2.0, 50.0);
+            let new_distance = (distance + delta_y * zoom_speed).clamp(0.01, 100.0);
             
             // Scale position to new distance
             let scale = new_distance / distance;
