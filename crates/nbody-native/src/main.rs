@@ -5,10 +5,10 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use std::num::NonZeroU32;
 use winit::{
-    event::{Event, WindowEvent},
+    event::{Event, WindowEvent, MouseButton, ElementState, MouseScrollDelta},
     event_loop::{ControlFlow, EventLoop},
     window::{WindowBuilder, Window},
-    dpi::LogicalSize,
+    dpi::{LogicalSize, PhysicalPosition},
 };
 use glutin::{
     config::ConfigTemplateBuilder,
@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 mod fileio;
 
-use nbody_core::{Body, Simulation, Renderer};
+use nbody_core::{Body2D as Body, Body3D, Simulation, Simulation3D, Renderer, Renderer3D};
 
 const DEFAULT_BODIES: usize = 1000;
 const DEFAULT_MASS: f64 = 2000.0;
@@ -103,11 +103,29 @@ struct Config {
     /// Use fixed scale view instead of following particles
     #[arg(long)]
     fixed_scale: bool,
+
+    /// Enable 3D simulation mode
+    #[arg(long)]
+    mode_3d: bool,
+
+    /// Show wireframe in 3D mode
+    #[arg(long)]
+    wireframe: bool,
+}
+
+enum SimulationMode {
+    Mode2D {
+        simulation: Simulation,
+        renderer: Option<Renderer>,
+    },
+    Mode3D {
+        simulation: Simulation3D,
+        renderer: Option<Renderer3D>,
+    },
 }
 
 struct SimulationState {
-    simulation: Simulation,
-    renderer: Option<Renderer>,
+    mode: SimulationMode,
     gl_context: Option<PossiblyCurrentContext>,
     gl_surface: Option<Surface<WindowSurface>>,
     step_count: usize,
@@ -116,13 +134,21 @@ struct SimulationState {
     last_save: usize,
     frame_times: Vec<Duration>,  // Track recent frame times
     fps_update_timer: Instant,   // Timer for FPS updates
+    // Camera controls for 3D mode
+    mouse_pressed: bool,
+    last_mouse_pos: PhysicalPosition<f64>,
+    camera_theta: f32,  // Horizontal rotation around Y axis
+    camera_phi: f32,    // Vertical rotation
+    camera_distance: f32,
 }
 
 impl SimulationState {
-    fn new(simulation: Simulation) -> Self {
+    fn new_2d(simulation: Simulation) -> Self {
         SimulationState {
-            simulation,
-            renderer: None,
+            mode: SimulationMode::Mode2D {
+                simulation,
+                renderer: None,
+            },
             gl_context: None,
             gl_surface: None,
             step_count: 0,
@@ -131,6 +157,35 @@ impl SimulationState {
             last_save: 0,
             frame_times: Vec::with_capacity(60),
             fps_update_timer: Instant::now(),
+            // Camera controls (unused in 2D mode)
+            mouse_pressed: false,
+            last_mouse_pos: PhysicalPosition::new(0.0, 0.0),
+            camera_theta: 0.0,
+            camera_phi: 0.0,
+            camera_distance: 10.0,
+        }
+    }
+
+    fn new_3d(simulation: Simulation3D) -> Self {
+        SimulationState {
+            mode: SimulationMode::Mode3D {
+                simulation,
+                renderer: None,
+            },
+            gl_context: None,
+            gl_surface: None,
+            step_count: 0,
+            sim_time: 0.0,
+            last_render: Instant::now(),
+            last_save: 0,
+            frame_times: Vec::with_capacity(60),
+            fps_update_timer: Instant::now(),
+            // Camera controls for 3D mode - start at a better viewing angle
+            mouse_pressed: false,
+            last_mouse_pos: PhysicalPosition::new(0.0, 0.0),
+            camera_theta: std::f32::consts::PI * 0.25,    // 45 degrees around Y axis
+            camera_phi: std::f32::consts::PI * 0.15,      // 15 degrees up from horizon
+            camera_distance: 5.0, // Closer to the action
         }
     }
 
@@ -201,8 +256,22 @@ impl SimulationState {
             .set_swap_interval(&gl_context, SwapInterval::Wait(NonZeroU32::new(1).unwrap()))
             .map_err(|e| format!("Failed to set swap interval: {}", e))?;
 
-        // Initialize renderer
-        self.renderer = Some(Renderer::new(gl, config.point_size, config.fixed_scale)?);
+        // Initialize renderer based on mode
+        match &mut self.mode {
+            SimulationMode::Mode2D { renderer, .. } => {
+                let mut renderer_2d = Renderer::new(gl, config.point_size, config.fixed_scale)?;
+                renderer_2d.set_wireframe(config.wireframe);
+                *renderer = Some(renderer_2d);
+            }
+            SimulationMode::Mode3D { renderer, .. } => {
+                let aspect_ratio = config.width as f32 / config.height as f32;
+                let mut renderer_3d = Renderer3D::new(gl, config.point_size, aspect_ratio)?;
+                renderer_3d.set_wireframe(config.wireframe);
+                *renderer = Some(renderer_3d);
+                // Set initial camera position for 3D mode
+                self.update_camera_3d();
+            }
+        }
         self.gl_context = Some(gl_context);
         self.gl_surface = Some(gl_surface);
 
@@ -210,22 +279,33 @@ impl SimulationState {
     }
 
     fn update(&mut self, config: &Config) -> Result<(), String> {
-        self.simulation.step();
+        // Step simulation based on mode
+        match &mut self.mode {
+            SimulationMode::Mode2D { simulation, .. } => {
+                simulation.step();
+            }
+            SimulationMode::Mode3D { simulation, .. } => {
+                simulation.step();
+            }
+        }
+        
         self.step_count += 1;
         self.sim_time += config.timestep;
 
-        // Save state if requested
+        // Save state if requested (only for 2D mode for now)
         if let Some(ref output_file) = config.output_file {
             if self.step_count % config.write_interval == 0 {
-                fileio::write_bodies(
-                    output_file,
-                    self.simulation.bodies(),
-                    config.timestep,
-                    config.g,
-                    config.softening,
-                    config.tree_ratio,
-                )?;
-                self.last_save = self.step_count;
+                if let SimulationMode::Mode2D { simulation, .. } = &self.mode {
+                    fileio::write_bodies(
+                        output_file,
+                        simulation.bodies(),
+                        config.timestep,
+                        config.g,
+                        config.softening,
+                        config.tree_ratio,
+                    )?;
+                    self.last_save = self.step_count;
+                }
             }
         }
 
@@ -251,13 +331,82 @@ impl SimulationState {
         self.last_render.elapsed() >= FRAME_TIME
     }
 
+    fn handle_mouse_input(&mut self, button: MouseButton, state: ElementState, position: PhysicalPosition<f64>) {
+        match button {
+            MouseButton::Left => {
+                self.mouse_pressed = state == ElementState::Pressed;
+                if self.mouse_pressed {
+                    self.last_mouse_pos = position;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_mouse_motion(&mut self, position: PhysicalPosition<f64>) {
+        if self.mouse_pressed {
+            let dx = (position.x - self.last_mouse_pos.x) as f32;
+            let dy = (position.y - self.last_mouse_pos.y) as f32;
+            
+            // Rotate camera based on mouse movement
+            let sensitivity = 0.01;
+            self.camera_theta += dx * sensitivity;
+            self.camera_phi += dy * sensitivity; // Reverse Y for different feel
+            
+            // Clamp phi to prevent gimbal lock
+            self.camera_phi = self.camera_phi.clamp(-std::f32::consts::PI * 0.48, std::f32::consts::PI * 0.48);
+            
+            self.last_mouse_pos = position;
+            
+            // Update camera position
+            self.update_camera_3d();
+        }
+    }
+
+    fn handle_scroll(&mut self, delta_y: f32) {
+        // Zoom in/out with scroll wheel
+        let zoom_speed = 0.5;
+        self.camera_distance = (self.camera_distance - delta_y * zoom_speed).clamp(2.0, 50.0);
+        self.update_camera_3d();
+    }
+
+    fn update_camera_3d(&mut self) {
+        if let SimulationMode::Mode3D { renderer, .. } = &mut self.mode {
+            if let Some(renderer) = renderer {
+                let camera = renderer.camera_mut();
+                
+                // Convert spherical coordinates to cartesian
+                // theta=0 should be +Z axis, phi=0 should be XZ plane
+                let x = self.camera_distance * self.camera_phi.cos() * self.camera_theta.sin();
+                let y = self.camera_distance * self.camera_phi.sin();
+                let z = self.camera_distance * self.camera_phi.cos() * self.camera_theta.cos();
+                
+                camera.position = [x, y, z];
+                camera.target = [0.0, 0.0, 0.0]; // Always look at origin
+            }
+        }
+    }
+
     fn render(&mut self) {
-        if let (Some(renderer), Some(gl_surface), Some(gl_context)) = 
-            (self.renderer.as_ref(), self.gl_surface.as_ref(), self.gl_context.as_ref()) {
+        if let (Some(gl_surface), Some(gl_context)) = 
+            (self.gl_surface.as_ref(), self.gl_context.as_ref()) {
             let frame_start = Instant::now();
             
-            let tree = self.simulation.get_tree();
-            renderer.render(self.simulation.bodies(), &tree);
+            match &self.mode {
+                SimulationMode::Mode2D { simulation, renderer } => {
+                    if let Some(renderer) = renderer {
+                        let tree = simulation.get_tree();
+                        renderer.render(simulation.bodies(), &tree);
+                    }
+                }
+                SimulationMode::Mode3D { simulation, renderer } => {
+                    if let Some(renderer) = renderer {
+                        let tree = simulation.get_tree();
+                        renderer.render(simulation.bodies(), &tree);
+                    }
+                }
+            }
+            
             gl_surface.swap_buffers(gl_context).unwrap();
             
             // Track frame time
@@ -301,22 +450,83 @@ fn random_bodies(config: &Config) -> Vec<Body> {
     bodies
 }
 
-fn run_simulation(config: Config) -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize bodies either from file or random distribution
-    let bodies = if let Some(ref input_file) = config.input_file {
-        fileio::read_bodies(input_file)?
-    } else {
-        random_bodies(&config)
-    };
+fn random_bodies_3d(config: &Config) -> Vec<Body3D> {
+    let mut rng = rand::thread_rng();
+    let mut bodies = Vec::with_capacity(config.n_bodies);
 
-    // Create simulation
-    let simulation = Simulation::new(
-        bodies,
-        config.timestep,
-        config.g,
-        config.softening,
-        config.tree_ratio
+    // Create central body first
+    let central_body = Body3D::new_3d(
+        config.mzero,
+        0.0, 0.0, 0.0,  // position
+        0.0, 0.0, 0.0   // velocity
     );
+    println!("3D Central body: mass={}, pos=[{}, {}, {}]", 
+        central_body.mass, central_body.position[0], central_body.position[1], central_body.position[2]);
+    bodies.push(central_body);
+
+    // Create remaining bodies in 3D space
+    for i in 1..config.n_bodies {
+        // Generate random spherical coordinates with larger scale
+        let r = rng.gen::<f64>() * 10.0 - 5.0; // Range [-5, 5] - much larger scale
+        let theta = 2.0 * PI * rng.gen::<f64>(); // Azimuthal angle
+        let phi = PI * rng.gen::<f64>(); // Polar angle
+
+        let x = r * phi.sin() * theta.cos();
+        let y = r * phi.sin() * theta.sin();
+        let z = r * phi.cos();
+
+        // Debug first few bodies
+        if i <= 3 {
+            println!("3D Body {}: r={:.2}, x={:.2}, y={:.2}, z={:.2}", i, r, x, y, z);
+        }
+
+        let mut vx = 0.0;
+        let mut vy = 0.0;
+        let mut vz = 0.0;
+
+        if config.spin != 0.0 {
+            let spin_factor = config.spin * (1.0 + 0.1 * rng.gen::<f64>()) / (1.0 + r.abs());
+            // Create orbital motion around z-axis (like a disk)
+            vx = -y * spin_factor; 
+            vy = x * spin_factor;
+            vz = 0.0; // Keep motion primarily in xy plane initially
+        }
+
+        bodies.push(Body3D::new_3d(config.mass, x, y, z, vx, vy, vz));
+    }
+
+    bodies
+}
+
+fn run_simulation(config: Config) -> Result<(), Box<dyn std::error::Error>> {
+    // Create simulation state based on mode
+    let mut state = if config.mode_3d {
+        // 3D mode
+        let bodies = random_bodies_3d(&config);
+        let simulation = Simulation3D::new(
+            bodies,
+            config.timestep,
+            config.g,
+            config.softening,
+            config.tree_ratio
+        );
+        SimulationState::new_3d(simulation)
+    } else {
+        // 2D mode (default)
+        let bodies = if let Some(ref input_file) = config.input_file {
+            fileio::read_bodies(input_file)?
+        } else {
+            random_bodies(&config)
+        };
+        let simulation = Simulation::new(
+            bodies,
+            config.timestep,
+            config.g,
+            config.softening,
+            config.tree_ratio
+        );
+        SimulationState::new_2d(simulation)
+    };
 
     // Print initial configuration
     println!("{}",
@@ -337,8 +547,10 @@ fn run_simulation(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         console::style("Graphics").cyan(),
         console::style(!config.no_graphics).yellow()
     );
-
-    let mut state = SimulationState::new(simulation);
+    println!("{}: {}", 
+        console::style("Mode").cyan(),
+        console::style(if config.mode_3d { "3D" } else { "2D" }).yellow()
+    );
 
     if !config.no_graphics {
         let event_loop = EventLoop::new();
@@ -353,6 +565,34 @@ fn run_simulation(config: Config) -> Result<(), Box<dyn std::error::Error>> {
                     ..
                 } => {
                     *control_flow = ControlFlow::Exit;
+                }
+                Event::WindowEvent {
+                    event: WindowEvent::MouseInput { button, state: element_state, .. },
+                    ..
+                } => {
+                    if config.mode_3d {
+                        state.handle_mouse_input(button, element_state, state.last_mouse_pos);
+                    }
+                }
+                Event::WindowEvent {
+                    event: WindowEvent::CursorMoved { position, .. },
+                    ..
+                } => {
+                    if config.mode_3d {
+                        state.handle_mouse_motion(position);
+                    }
+                }
+                Event::WindowEvent {
+                    event: WindowEvent::MouseWheel { delta, .. },
+                    ..
+                } => {
+                    if config.mode_3d {
+                        let delta_y = match delta {
+                            MouseScrollDelta::LineDelta(_, y) => y,
+                            MouseScrollDelta::PixelDelta(pos) => pos.y as f32 * 0.01,
+                        };
+                        state.handle_scroll(delta_y);
+                    }
                 }
                 Event::MainEventsCleared => {
                     if let Err(e) = state.update(&config) {
