@@ -178,6 +178,9 @@
     <div class="container">
         <div class="controls">
             <h2>Simulation Controls</h2>
+            <div id="mode-info" style="background: #1a4a1a; padding: 10px; border-radius: 4px; margin-bottom: 1rem; font-size: 0.9rem; color: #90ee90; display: none;">
+                <strong>3D Mode Active:</strong> Click and drag to rotate camera • Scroll to zoom
+            </div>
             <form id="configForm">
                 <div class="form-grid">
                     <div class="form-group">
@@ -222,6 +225,18 @@
                             <label for="fixed_scale">Fixed Scale</label>
                         </div>
                     </div>
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="mode_3d">
+                            <label for="mode_3d">3D Mode</label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="show_wireframe" checked>
+                            <label for="show_wireframe">Show Wireframe</label>
+                        </div>
+                    </div>
                 </div>
                 <button type="submit">Restart Simulation</button>
             </form>
@@ -236,6 +251,9 @@
 
         let simulation = null;
         let animationId = null;
+        let isMouseDown = false;
+        let lastMouseX = 0;
+        let lastMouseY = 0;
 
         function getConfig() {
             const config = new SimConfig();
@@ -249,6 +267,8 @@
             config.tree_ratio = parseFloat(document.getElementById('tree_ratio').value);
             config.point_size = parseFloat(document.getElementById('point_size').value);
             config.fixed_scale = document.getElementById('fixed_scale').checked;
+            config.mode_3d = document.getElementById('mode_3d').checked;
+            config.show_wireframe = document.getElementById('show_wireframe').checked;
             return config;
         }
 
@@ -258,6 +278,67 @@
             const size = Math.min(container.clientWidth, container.clientHeight);
             canvas.width = size;
             canvas.height = size;
+        }
+
+        function setupMouseControls() {
+            const canvas = document.getElementById('canvas');
+            
+            canvas.addEventListener('mousedown', (e) => {
+                isMouseDown = true;
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+                if (simulation) {
+                    simulation.handle_mouse_down(e.clientX, e.clientY);
+                }
+            });
+
+            canvas.addEventListener('mouseup', () => {
+                isMouseDown = false;
+            });
+
+            canvas.addEventListener('mouseleave', () => {
+                isMouseDown = false;
+            });
+
+            canvas.addEventListener('mousemove', (e) => {
+                if (isMouseDown && simulation) {
+                    const dx = e.clientX - lastMouseX;
+                    const dy = e.clientY - lastMouseY;
+                    simulation.handle_mouse_move(dx, dy);
+                    lastMouseX = e.clientX;
+                    lastMouseY = e.clientY;
+                }
+            });
+
+            canvas.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                if (simulation) {
+                    simulation.handle_scroll(e.deltaY * 0.01);
+                }
+            });
+        }
+
+        function updateModeInfo() {
+            const modeInfo = document.getElementById('mode-info');
+            const is3D = document.getElementById('mode_3d').checked;
+            modeInfo.style.display = is3D ? 'block' : 'none';
+            
+            // Adjust default values for 3D mode
+            const spinInput = document.getElementById('spin');
+            const pointSizeInput = document.getElementById('point_size');
+            
+            // if (is3D) {
+            //     if (spinInput.value === '0.05') spinInput.value = '0.005';
+            //     if (pointSizeInput.value === '2.0') pointSizeInput.value = '4.0';
+            // } else {
+            //     if (spinInput.value === '0.005') spinInput.value = '0.05';
+            //     if (pointSizeInput.value === '4.0') pointSizeInput.value = '2.0';
+            // }
+            
+            // Automatically restart simulation when mode changes
+            if (simulation) {
+                startSimulation();
+            }
         }
 
         async function startSimulation() {
@@ -282,6 +363,19 @@
 
         async function run() {
             await init();
+
+            setupMouseControls();
+
+            // Set up 3D mode toggle
+            document.getElementById('mode_3d').addEventListener('change', updateModeInfo);
+            updateModeInfo(); // Initialize mode info
+
+            // Set up wireframe toggle
+            document.getElementById('show_wireframe').addEventListener('change', (e) => {
+                if (simulation) {
+                    simulation.set_wireframe(e.target.checked);
+                }
+            });
 
             window.addEventListener('resize', () => {
                 resizeCanvas();
