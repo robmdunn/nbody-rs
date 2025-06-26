@@ -351,7 +351,7 @@ impl SimulationState {
             // Rotate camera based on mouse movement
             let sensitivity = 0.01;
             self.camera_theta += dx * sensitivity;
-            self.camera_phi += dy * sensitivity; // Reverse Y for different feel
+            self.camera_phi -= dy * sensitivity;
             
             // Clamp phi to prevent gimbal lock
             self.camera_phi = self.camera_phi.clamp(-std::f32::consts::PI * 0.48, std::f32::consts::PI * 0.48);
@@ -366,7 +366,7 @@ impl SimulationState {
     fn handle_scroll(&mut self, delta_y: f32) {
         // Zoom in/out with scroll wheel
         let zoom_speed = 0.5;
-        self.camera_distance = (self.camera_distance - delta_y * zoom_speed).clamp(2.0, 50.0);
+        self.camera_distance = (self.camera_distance - delta_y * zoom_speed).clamp(0.01, 100.0);
         self.update_camera_3d();
     }
 
