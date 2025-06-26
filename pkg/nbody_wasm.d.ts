@@ -10,6 +10,24 @@ export class NBodySimulation {
   constructor(canvas: HTMLCanvasElement, config: SimConfig);
   step(): void;
   render(): void;
+  /**
+   * @param {number} x
+   * @param {number} y
+   */
+  handle_mouse_down(x: number, y: number): void;
+  /**
+   * @param {number} dx
+   * @param {number} dy
+   */
+  handle_mouse_move(dx: number, dy: number): void;
+  /**
+   * @param {number} delta_y
+   */
+  handle_scroll(delta_y: number): void;
+  /**
+   * @param {boolean} show_wireframe
+   */
+  set_wireframe(show_wireframe: boolean): void;
 }
 export class SimConfig {
   free(): void;
@@ -17,9 +35,11 @@ export class SimConfig {
   fixed_scale: boolean;
   g: number;
   mass: number;
+  mode_3d: boolean;
   mzero: number;
   n_bodies: number;
   point_size: number;
+  show_wireframe: boolean;
   softening: number;
   spin: number;
   timestep: number;
@@ -51,17 +71,27 @@ export interface InitOutput {
   readonly __wbg_set_simconfig_point_size: (a: number, b: number) => void;
   readonly __wbg_get_simconfig_fixed_scale: (a: number) => number;
   readonly __wbg_set_simconfig_fixed_scale: (a: number, b: number) => void;
+  readonly __wbg_get_simconfig_mode_3d: (a: number) => number;
+  readonly __wbg_set_simconfig_mode_3d: (a: number, b: number) => void;
+  readonly __wbg_get_simconfig_show_wireframe: (a: number) => number;
+  readonly __wbg_set_simconfig_show_wireframe: (a: number, b: number) => void;
   readonly simconfig_new: () => number;
   readonly __wbg_nbodysimulation_free: (a: number, b: number) => void;
-  readonly nbodysimulation_new: (a: number, b: number, c: number) => void;
+  readonly nbodysimulation_new: (a: number, b: number) => Array;
   readonly nbodysimulation_step: (a: number) => void;
   readonly nbodysimulation_render: (a: number) => void;
+  readonly nbodysimulation_handle_mouse_down: (a: number, b: number, c: number) => void;
+  readonly nbodysimulation_handle_mouse_move: (a: number, b: number, c: number) => void;
+  readonly nbodysimulation_handle_scroll: (a: number, b: number) => void;
+  readonly nbodysimulation_set_wireframe: (a: number, b: number) => void;
   readonly main_js: () => void;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
-  readonly __wbindgen_add_to_stack_pointer: (a: number) => number;
+  readonly __wbindgen_export_2: WebAssembly.Table;
+  readonly __externref_table_dealloc: (a: number) => void;
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly __wbindgen_exn_store: (a: number) => void;
+  readonly __externref_table_alloc: () => number;
   readonly __wbindgen_start: () => void;
 }
 
