@@ -1,8 +1,12 @@
 # N-Body Simulation
 
-A gravitational N-body simulation implemented in Rust, supporting native and WebAssembly targets. The simulation uses the Barnes-Hut algorithm for force calculations and real-time visualization using OpenGL/WebGL.
+A gravitational N-body simulation implemented in Rust, supporting native and WebAssembly targets. The simulation uses the Barnes-Hut algorithm for force calculations and real-time visualization using OpenGL/WebGL.  
+
+See it live in your browser here: https://robmdunn.github.io/nbody-rs/ 
 
 ![N-Body Simulation](https://raw.githubusercontent.com/robmdunn/nbody-rs/main/nbody.png)
+
+![N-Body Simulation 3D](https://raw.githubusercontent.com/robmdunn/nbody-rs/main/nbody3d.png)
 
 ## Features
 
@@ -13,6 +17,7 @@ A gravitational N-body simulation implemented in Rust, supporting native and Web
 - Support for both native desktop and WebAssembly targets
 - State saving and loading for simulation checkpoints
 - Adaptive viewport scaling and fixed-scale viewing options
+- 2D and 3D simulation modes.
 
 ## Build Requirements
 
@@ -87,6 +92,8 @@ Options:
       --height <HEIGHT>          Window height [default: 800]
   -p, --point-size <POINT_SIZE>  Point size for rendering bodies [default: 2]
       --fixed-scale              Use fixed scale view instead of following particles
+      --mode-3d                  Enable 3D simulation mode
+      --wireframe                Show wireframe in 3D mode
   -h, --help                     Print help
   -V, --version                  Print version
 ```
